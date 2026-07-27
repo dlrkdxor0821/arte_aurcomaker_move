@@ -7,6 +7,8 @@
 cv2.aruco API 는 4.6 과 4.7+ 가 다르다(ArucoDetector / generateImageMarker 는 4.7+).
 로봇과 노트북의 설치 버전이 다를 수 있으므로 양쪽을 지원한다.
 """
+import math
+
 import cv2
 import numpy as np
 
@@ -82,7 +84,7 @@ def scan_dicts(frame) -> list[tuple[str, list[int]]]:
 
 
 def detect_marker(frame, K, dist, *, marker_len_m: float, target_id: int,
-                  dict_name: str) -> MarkerObs | None:
+                  dict_name: str, max_reproj_px: float = 4.0) -> MarkerObs | None:
     """대상 ID 마커를 찾아 관측값을 만든다. 없으면 None.
 
     `lateral_m` 은 **마커 로컬 X 축(벽면 수평축) 위의 부호 있는 이탈**이다.
@@ -106,11 +108,19 @@ def detect_marker(frame, K, dist, *, marker_len_m: float, target_id: int,
     ex = (float(pts[:, 0].mean()) - w / 2.0) / (w / 2.0)
     side_px = float(np.mean([np.linalg.norm(pts[(i + 1) % 4] - pts[i]) for i in range(4)]))
 
-    ok, rvec, tvec = cv2.solvePnP(marker_object_points(marker_len_m), pts, K, dist,
-                                  flags=cv2.SOLVEPNP_IPPE_SQUARE)
+    obj = marker_object_points(marker_len_m)
+    ok, rvec, tvec = cv2.solvePnP(obj, pts, K, dist, flags=cv2.SOLVEPNP_IPPE_SQUARE)
     if not ok:
         return None
     tvec = np.asarray(tvec, dtype=np.float64).reshape(3)
+    if not np.isfinite(tvec).all() or tvec[2] <= 0.0:
+        return None      # 카메라 뒤쪽 해는 물리적으로 불가능하다. 음수 거리를 그대로
+        #                  내보내면 정지 조건(z <= stop_m)을 즉시 만족시켜 버린다.
+    # 재투영 오차 게이트: 자세 해가 코너와 안 맞으면 그 pose 는 못 믿는다.
+    proj, _ = cv2.projectPoints(obj, rvec, tvec, K, dist)
+    rms = float(np.sqrt((((proj.reshape(4, 2) - pts) ** 2).sum(axis=1)).mean()))
+    if not math.isfinite(rms) or rms > max_reproj_px:
+        return None
     R, _ = cv2.Rodrigues(np.asarray(rvec, dtype=np.float64).reshape(3))
     yaw = float(np.degrees(np.arctan2(-R[2, 0], np.sqrt(R[2, 1] ** 2 + R[2, 2] ** 2))))
     cam_in_marker = R.T @ -tvec              # 카메라 중심을 마커 좌표계로

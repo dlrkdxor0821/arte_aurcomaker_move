@@ -40,6 +40,8 @@ class MarkerDriveConfig:
     pose_axis_tol_m: float = 0.08
     pose_yaw_tol_deg: float = 8.0   # 정렬 완료 판정에 yaw 도 포함한다.
     #   lateral 만 보면 yaw 가 30° 틀어진 채로 무시각 구간에 진입한다.
+    yaw_offset_deg: float = 0.0     # 카메라가 로봇 정면에서 틀어져 달린 만큼 뺀다.
+    #   steer_sign 은 좌우를 뒤집을 뿐이라 이 편향은 못 없앤다. 현장에서 재는 값.
 
     # --- 속도 (/cmd_vel 이라 m/s, rad/s) ---
     lin_homing: float = 0.12
@@ -92,6 +94,7 @@ class MarkerDriveConfig:
             pose_kp_lat=_clamp(self.pose_kp_lat, 0.0, 5.0),
             pose_axis_tol_m=_clamp(self.pose_axis_tol_m, 0.005, 0.4),
             pose_yaw_tol_deg=_clamp(self.pose_yaw_tol_deg, 1.0, 45.0),
+            yaw_offset_deg=_clamp(self.yaw_offset_deg, -45.0, 45.0),
             stop_m=_clamp(self.stop_m, 0.02, 1.0),
             front_offset_m=_clamp(self.front_offset_m, 0.0, 0.5),
             scan_guard_m=_clamp(self.scan_guard_m, 0.0, 0.5),

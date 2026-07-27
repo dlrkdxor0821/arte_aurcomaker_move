@@ -47,6 +47,25 @@ def test_search_aborts_after_full_sweep():
     assert c.reason == "not_found"
 
 
+def test_search_completes_sweep_even_with_coarse_yaw_steps():
+    """루프가 느려 한 틱에 여러 도씩 돌아도 스윕이 진행돼야 한다.
+
+    ±tol 창만 보면 5Hz(4°/tick)에서 창을 건너뛰어 도달 판정이 영영 안 난다.
+    목표 각 교차로도 판정하므로 통과해야 한다.
+    """
+    m = MarkerApproach(MarkerDriveConfig(search_step_deg=20.0, search_span_deg=60.0,
+                                         search_tol_deg=2.0, turn_pause_s=0.0,
+                                         search_step_timeout_s=5.0, timeout_s=600.0))
+    yaw, t, c = 0.0, 0.0, None
+    for _ in range(400):
+        c = step(m, yaw=yaw, t=t)
+        if c.done:
+            break
+        yaw += 12.0 if c.angular > 0 else (-12.0 if c.angular < 0 else 0.0)
+        t += 0.2
+    assert c.phase == "ABORT" and c.reason == "not_found"   # turn_stall 이 아니어야 한다
+
+
 def test_search_aborts_when_rotation_makes_no_progress():
     """회전 명령을 내는데 yaw 가 안 변한다 = 바퀴 헛돎이거나 odom 정지.
 
@@ -287,3 +306,70 @@ def test_finished_machine_keeps_returning_zero():
     step(m, obs(0.05), t=0.2)               # DONE
     c = step(m, obs(0.5), t=0.3)
     assert c.done and c.linear == 0.0 and c.angular == 0.0
+
+
+# ------------------------------------------------- codex 적대적 리뷰 회귀 테스트
+
+def test_loss_while_misaligned_does_not_enter_blind_push():
+    """보이는 동안엔 yaw 를 확인하는데 상실 경로가 그 검사를 우회하면 안 된다.
+
+    45° 틀어진 채로 마커를 잃고 무시각 직진에 들어가면 비뚤게 박는다.
+    """
+    m = _to_axis_align(MarkerDriveConfig(lost_grace=1, lost_near_m=0.25,
+                                         align_stall_s=100.0))
+    step(m, obs(0.18, yaw=45.0, lat=0.15), t=0.2)
+    c = step(m, t=0.3)
+    assert c.phase != "BLIND_PUSH"
+    assert c.phase == "SEARCH"
+
+
+def test_stop_distance_while_misaligned_rotates_instead_of_finishing():
+    """거리가 맞아도 비뚤면 완료가 아니다 — 전진을 멈추고 제자리에서 맞춘다."""
+    m = _to_axis_align(MarkerDriveConfig(stop_m=0.10, front_offset_m=0.0,
+                                         pose_yaw_tol_deg=8.0, align_stall_s=100.0))
+    c = step(m, obs(0.09, yaw=45.0, lat=0.20), t=0.2)
+    assert not c.done
+    assert c.phase == "AXIS_ALIGN" and c.reason == "final_align"
+    assert c.linear == 0.0 and abs(c.angular) > 0
+
+
+def test_align_stall_budget_resets_after_an_aligned_frame():
+    """한 번 맞았다가 다시 틀어지면 정렬 예산을 새로 받아야 한다."""
+    # z 는 lost_near_m(0.25) 보다 멀게 둔다 — 가까우면 정렬된 순간 정상적으로
+    # BLIND_PUSH 로 넘어가 버려서 이 테스트가 검증하려는 지점을 못 본다.
+    m = _to_axis_align(MarkerDriveConfig(align_stall_s=0.5, pose_yaw_tol_deg=8.0))
+    step(m, obs(0.40, yaw=45.0), t=0.5)            # 미정렬
+    step(m, obs(0.40, yaw=1.0, lat=0.0), t=0.55)   # 정렬됨 → 예산 갱신
+    c = step(m, obs(0.40, yaw=45.0), t=0.70)       # 다시 미정렬(0.15s 경과)
+    assert c.phase == "AXIS_ALIGN"
+
+
+def test_align_stall_timer_does_not_leak_across_search():
+    """상실→탐색→재획득한 정렬 시도가 즉시 중단되면 안 된다."""
+    m = MarkerApproach(MarkerDriveConfig(lost_grace=1, align_stall_s=0.5,
+                                         pose_axis_tol_m=0.08))
+    step(m, obs(0.50, lat=0.10), t=0.0)      # AXIS_ALIGN 진입(미정렬)
+    step(m, t=0.1)                            # 상실 → SEARCH
+    c = step(m, obs(0.50, lat=0.10), t=1.0)  # 재획득
+    assert c.phase == "AXIS_ALIGN" and not c.done
+
+
+def test_steering_state_is_reset_after_reacquisition():
+    """상실 구간을 넘어 LPF 가 살아남으면 재획득 첫 틱이 옛 방향으로 나간다."""
+    m = MarkerApproach(MarkerDriveConfig(lost_grace=1, axis_gate_m=0.6))
+    right = step(m, obs(1.5, ex=+0.5), t=0.0)
+    step(m, t=0.1)                            # 상실 → SEARCH (조향 상태 초기화)
+    left = step(m, obs(1.5, ex=-0.5), t=1.0)
+    assert right.angular * left.angular < 0   # 즉시 반대로 꺾여야 한다
+
+
+def test_dt_uses_real_elapsed_time():
+    """적분은 실제 경과 시간을 받아야 한다. 1/loop_hz 고정이면 시간을 속인다."""
+    cfg = MarkerDriveConfig(steer_ki=0.4, steer_kd=0.0, loop_hz=12.0,
+                            steer_ang_max=0.3, steer_ang_min=0.0)
+    fast = MarkerApproach(cfg)
+    slow = MarkerApproach(cfg)
+    for i in range(3):
+        f = step(fast, obs(1.5, ex=0.3), t=0.08 * i)
+        s = step(slow, obs(1.5, ex=0.3), t=1.00 * i)
+    assert abs(s.angular) > abs(f.angular)    # 느린 루프가 적분을 더 쌓는다

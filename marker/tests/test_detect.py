@@ -145,3 +145,36 @@ def test_oblique_still_detected_at_working_distance():
     o = observe(render_oblique(0.02, dist_m=0.13)[0])
     assert o is not None
     assert 0.11 < o.z_m < 0.16
+
+
+# ------------------------------------------------- codex 적대적 리뷰 회귀 테스트
+
+def test_pose_behind_camera_is_rejected(monkeypatch):
+    """카메라 뒤쪽 해(z<0)를 그대로 내보내면 정지 조건을 즉시 만족시켜 버린다."""
+    import marker.detect as det
+
+    def fake_solve(obj, pts, K, dist, flags=None):
+        return True, np.zeros((3, 1)), np.array([[0.0], [0.0], [-0.2]])
+
+    monkeypatch.setattr(det.cv2, "solvePnP", fake_solve)
+    assert observe(render_frontal()) is None
+
+
+def test_pose_with_large_reprojection_error_is_rejected(monkeypatch):
+    """코너와 안 맞는 자세 해는 못 믿는다 — 거리·각도가 통째로 거짓이 된다."""
+    import marker.detect as det
+
+    def fake_solve(obj, pts, K, dist, flags=None):
+        # 실제 위치와 전혀 다른 곳(옆으로 1m)에 있다고 우기는 해
+        return True, np.zeros((3, 1)), np.array([[1.0], [0.0], [1.0]])
+
+    monkeypatch.setattr(det.cv2, "solvePnP", fake_solve)
+    assert observe(render_frontal()) is None
+
+
+def test_good_pose_survives_the_reprojection_gate():
+    """게이트가 정상 검출까지 버리면 안 된다(문지방이 너무 낮은지 확인)."""
+    o = observe(render_frontal(z_m=1.0))
+    assert o is not None and abs(o.z_m - 1.0) < 0.05
+    o2 = observe(render_oblique(0.15)[0])
+    assert o2 is not None
