@@ -122,18 +122,14 @@ class MarkerApproach:
         self._prev_ex = 0.0
 
     def _align_error(self, o: MarkerObs) -> float:
-        """정렬 오차를 허용치로 정규화한 하나의 수. 1.0 이하면 정렬된 것이다."""
+        """정렬 오차를 허용치로 정규화한 하나의 수. 1.0 이하면 정렬된 것이다.
+
+        lateral 과 yaw 를 **둘 다** 본다. lateral 만 보면 yaw 가 크게 틀어진 채로
+        무시각 구간에 진입해서 남은 거리를 비스듬히 밀고 들어간다.
+        """
         c = self.cfg
         return max(abs(o.lateral_m) / c.pose_axis_tol_m,
                    abs(self._yaw(o)) / c.pose_yaw_tol_deg)
-
-    def _aligned(self, o: MarkerObs) -> bool:
-        """축 정렬 완료 판정 — lateral 과 yaw 를 **둘 다** 본다.
-
-        lateral 만 보면 yaw 가 크게 틀어진 채로 무시각 구간에 진입해서,
-        남은 거리를 비스듬히 밀고 들어간다.
-        """
-        return self._align_error(o) <= 1.0
 
     def _forward_progress_ok(self, forward_m: float, now_s: float) -> bool:
         """전진 명령을 내는 동안 odom 이 실제로 늘고 있나.
@@ -149,9 +145,6 @@ class MarkerApproach:
             self._progress_ref = (forward_m, now_s)
             return True
         return now_s - ref_t <= self.cfg.no_progress_s
-
-    def _reset_progress(self) -> None:
-        self._progress_ref = None
 
     # ---- 단계 ------------------------------------------------------------
     def _do_search(self, yaw_deg: float, now_s: float) -> Cmd:
@@ -316,8 +309,9 @@ class MarkerApproach:
             self._last_z = obs.z_m
             self._fwd_at_obs = forward_m
             if self.phase in ("SEARCH", "HOMING"):
+                # 이 분기는 phase 가 SEARCH/HOMING 일 때만 온다 — AXIS_ALIGN 재진입은 없다
                 nxt = "AXIS_ALIGN" if obs.z_m <= c.axis_gate_m else "HOMING"
-                if nxt == "AXIS_ALIGN" and self.phase != "AXIS_ALIGN":
+                if nxt == "AXIS_ALIGN":
                     self._align_since = None     # 재진입마다 정렬 시간을 새로 준다
                 self.phase = nxt
             if self.phase == "HOMING":

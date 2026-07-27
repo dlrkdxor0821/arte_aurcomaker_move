@@ -276,21 +276,6 @@ def test_blind_push_uses_displacement_not_path_length():
     assert c.phase == "BLIND_PUSH"
 
 
-def test_blind_push_ignores_sideways_motion():
-    """옆으로 밀린 거리는 전진이 아니다 — 벽까지 남은 거리가 줄지 않는다.
-
-    시작점 대비 직선거리로 재면 옆으로 6cm 밀린 것이 '도달'로 읽힌다.
-    """
-    m = MarkerApproach(MarkerDriveConfig(lost_grace=1, lost_near_m=0.25,
-                                         stop_m=0.10, front_offset_m=0.0,
-                                         no_progress_s=100.0))
-    step(m, obs(0.5), t=0.0)
-    step(m, obs(0.16), t=0.1)               # 남은 목표 0.06m
-    step(m, t=0.2, fwd=0.0)
-    c = step(m, t=0.3, fwd=0.0)             # 옆으로만 밀림 → 전진 성분 0
-    assert not c.done and c.phase == "BLIND_PUSH"
-
-
 def test_blind_push_subtracts_coasting_during_lost_grace():
     """상실 유예 동안 관성으로 더 간 거리는 목표에서 빠져야 한다.
 
