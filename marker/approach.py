@@ -72,6 +72,9 @@ class MarkerApproach:
         self._progress_ref = None    # (진행거리, 시각) — 무진전 판정 기준
         self._align_since = None     # **연속 미정렬**이 시작된 시각
         self._last_aligned = False   # 마지막 관측이 정렬 상태였나(상실 경로 판단용)
+        self._aligned_run = 0        # 연속으로 정렬 판정된 프레임 수
+        self._align_best = None      # 현재 국면의 최소 정렬 오차(진전 판정 기준)
+        self._final_align_since = None  # 목표 거리에서 제자리 정렬을 시작한 시각
 
     # ---- 내부 헬퍼 -------------------------------------------------------
     def _stop(self, reason: str, phase: str) -> Cmd:
@@ -118,14 +121,37 @@ class MarkerApproach:
         self._i_acc = 0.0
         self._prev_ex = 0.0
 
+    def _align_error(self, o: MarkerObs) -> float:
+        """정렬 오차를 허용치로 정규화한 하나의 수. 1.0 이하면 정렬된 것이다."""
+        c = self.cfg
+        return max(abs(o.lateral_m) / c.pose_axis_tol_m,
+                   abs(self._yaw(o)) / c.pose_yaw_tol_deg)
+
     def _aligned(self, o: MarkerObs) -> bool:
         """축 정렬 완료 판정 — lateral 과 yaw 를 **둘 다** 본다.
 
         lateral 만 보면 yaw 가 크게 틀어진 채로 무시각 구간에 진입해서,
         남은 거리를 비스듬히 밀고 들어간다.
         """
-        c = self.cfg
-        return abs(o.lateral_m) <= c.pose_axis_tol_m and abs(self._yaw(o)) <= c.pose_yaw_tol_deg
+        return self._align_error(o) <= 1.0
+
+    def _forward_progress_ok(self, forward_m: float, now_s: float) -> bool:
+        """전진 명령을 내는 동안 odom 이 실제로 늘고 있나.
+
+        무시각 구간에만 이 감시를 두면, 바퀴가 헛도는 로봇이 접근·정렬 단계에서는
+        전역 타임아웃까지 계속 밀기만 한다.
+        """
+        if self._progress_ref is None:
+            self._progress_ref = (forward_m, now_s)
+            return True
+        ref_fwd, ref_t = self._progress_ref
+        if forward_m - ref_fwd > 0.005:
+            self._progress_ref = (forward_m, now_s)
+            return True
+        return now_s - ref_t <= self.cfg.no_progress_s
+
+    def _reset_progress(self) -> None:
+        self._progress_ref = None
 
     # ---- 단계 ------------------------------------------------------------
     def _do_search(self, yaw_deg: float, now_s: float) -> Cmd:
@@ -158,19 +184,29 @@ class MarkerApproach:
         return Cmd(0.0, c.ang_search if err > 0 else -c.ang_search,
                    "SEARCH", False, "sweep")
 
-    def _do_homing(self, o: MarkerObs, dt: float) -> Cmd:
+    def _do_homing(self, o: MarkerObs, dt: float, forward_m: float, now_s: float) -> Cmd:
+        if not self._forward_progress_ok(forward_m, now_s):
+            return self._stop("blocked", "ABORT")
         return Cmd(self.cfg.lin_homing, self._steer(o.ex, dt), "HOMING", False, "approach")
 
     def _do_axis_align(self, o: MarkerObs, now_s: float, forward_m: float) -> Cmd:
         c = self.cfg
-        aligned = self._aligned(o)
+        err = self._align_error(o)
+        aligned = err <= 1.0
         self._last_aligned = aligned
-        # align_since 는 '정렬을 시작한 시각'이 아니라 '연속 미정렬이 시작된 시각'이다.
-        # 한 번 맞았다가 다시 틀어지면 예산을 새로 줘야 한다. 안 그러면 정렬에
-        # 성공했던 시도가 나중 프레임 하나로 즉시 중단된다.
-        if aligned or self._align_since is None:
+        self._aligned_run = self._aligned_run + 1 if aligned else 0
+        # 정체 판정은 **오차가 줄었는가**로 한다. 경과 시간으로 자르면 정상 수렴을
+        # 중단시킨다: 45° 를 steer_ang_max(0.08rad/s) 로 8° 안까지 줄이려면 8.1초다.
+        #
+        # 기준값은 '역대 최소'가 아니라 '현재 국면의 최소'다. 역대 최소로 두면 좋은
+        # 프레임 하나(오차 0)에 갇혀서, 이후 어떤 실제 개선도 진전으로 안 잡힌다.
+        # 오차가 유의하게 나빠지면 새 국면으로 보고 예산을 새로 준다.
+        # (±eps 로 계속 진동하는 병적인 경우는 전역 timeout_s 가 받는다.)
+        if (self._align_best is None or err < self._align_best - c.align_progress_eps
+                or err > self._align_best + c.align_progress_eps):
+            self._align_best = err
             self._align_since = now_s
-        if not aligned and now_s - self._align_since > c.align_stall_s:
+        elif not aligned and now_s - self._align_since > c.align_stall_s:
             return self._stop("align_stall", "ABORT")
         # 마커 법선축에 올라타는 라인추종 제어: **교차오차 − 헤딩오차**.
         #
@@ -183,18 +219,33 @@ class MarkerApproach:
         u = c.pose_kp_lat * o.lateral_m - c.pose_kp_yaw * (self._yaw(o) / 90.0)
         ang = c.steer_sign * max(-c.steer_ang_max, min(c.steer_ang_max, u))
         if o.z_m <= c.stop_m + c.front_offset_m:
-            # 목표 거리에 닿았다. 정렬까지 됐으면 끝. 틀어져 있으면 **제자리 회전**으로
-            # 마저 맞춘다(전진은 멈춘다) — 비뚤게 도착하면 거리가 맞아도 실패다.
+            # 목표 거리에 닿았다. 정렬까지 됐으면 끝. 틀어져 있으면 전진을 멈추고
+            # **제자리 회전**으로 마저 맞춘다 — 비뚤게 도착하면 거리가 맞아도 실패다.
+            #
+            # 단 이 시도에는 한도를 둔다. 이 거리(7cm 마커 기준 12cm 안쪽)에서는
+            # 마커가 화면을 넘기 시작해 자세 추정이 깜빡인다. 무한정 맞추려 들면
+            # 정렬↔상실을 반복하다 탐색으로 빠져 영영 안 끝난다(시뮬레이션에서 확인).
+            # 정렬의 진짜 보증은 더 멀리서, 무시각 전진에 들어가기 전에 받는다.
             if aligned:
                 return self._stop("reached", "DONE")
+            if self._final_align_since is None:
+                self._final_align_since = now_s
+            if now_s - self._final_align_since > c.align_stall_s:
+                return self._stop("reached_skewed", "DONE")
             return Cmd(0.0, ang, "AXIS_ALIGN", False, "final_align")
-        if aligned and o.z_m <= c.lost_near_m:
+        # 근거리는 코너 추정이 가장 불안정한 구간이다. 한 프레임만 보고 눈을 감으면
+        # 튄 값 하나에 비뚤게 밀고 들어간다 — 연속으로 맞아야 넘어간다.
+        if self._aligned_run >= c.aligned_frames_needed and o.z_m <= c.lost_near_m:
             self._enter_blind(o.z_m, forward_m)
             return Cmd(0.0, 0.0, "BLIND_PUSH", False, "near")
         if now_s >= self._pulse_next:
             self._pulse_until = now_s + c.move_pulse_s
             self._pulse_next = now_s + c.move_pulse_s + c.move_pause_s
         lin = c.lin_pulse if now_s < self._pulse_until else 0.0
+        # 진행 감시는 **전진을 명령하는 동안만** 잰다. 펄스가 쉬는 구간까지 세면
+        # 정상적인 '조금 가고 멈춰 보기' 리듬이 막힘으로 오판된다.
+        if lin > 0.0 and not self._forward_progress_ok(forward_m, now_s):
+            return self._stop("blocked", "ABORT")
         return Cmd(lin, ang, "AXIS_ALIGN", False, "align")
 
     def _enter_blind(self, last_z: float, forward_m: float) -> None:
@@ -223,14 +274,8 @@ class MarkerApproach:
         gone = forward_m - self._blind_fwd0
         if gone >= self._blind_target:
             return self._stop("reached", "DONE")
-        if self._progress_ref is None:
-            self._progress_ref = (gone, now_s)
-        else:
-            ref_gone, ref_t = self._progress_ref
-            if gone - ref_gone > 0.005:
-                self._progress_ref = (gone, now_s)
-            elif now_s - ref_t > c.no_progress_s:
-                return self._stop("blocked", "ABORT")
+        if not self._forward_progress_ok(forward_m, now_s):
+            return self._stop("blocked", "ABORT")
         return Cmd(c.lin_pulse, 0.0, "BLIND_PUSH", False, "blind")
 
     # ---- 진입점 ----------------------------------------------------------
@@ -274,7 +319,7 @@ class MarkerApproach:
                     self._align_since = None     # 재진입마다 정렬 시간을 새로 준다
                 self.phase = nxt
             if self.phase == "HOMING":
-                return self._do_homing(obs, dt)
+                return self._do_homing(obs, dt, forward_m, now_s)
             if self.phase == "AXIS_ALIGN":
                 return self._do_axis_align(obs, now_s, forward_m)
             if self.phase == "BLIND_PUSH":
@@ -287,12 +332,18 @@ class MarkerApproach:
             self._lost += 1
             if self._lost < c.lost_grace:
                 return Cmd(0.0, 0.0, self.phase, False, "lost_grace")
-            # 시야 이탈로 인한 상실만 무시각 전진으로 이어진다. 마지막 관측이
-            # 틀어져 있었다면 그대로 밀면 비뚤게 박는다 — 다시 찾는 편이 낫다.
-            if (self._last_z is not None and self._last_z <= c.lost_near_m
-                    and self._last_aligned):
-                self._enter_blind(self._last_z, forward_m)
-                return self._do_blind_push(forward_m, now_s)
+            # 마지막 관측 거리로 갈린다.
+            if self._last_z is not None and self._last_z <= c.stop_m + c.front_offset_m:
+                # 이미 목표 거리 안이다. 마커가 시야를 벗어난 것뿐이고 갈 곳이 없다.
+                return self._stop("reached", "DONE")
+            if self._last_z is not None and self._last_z <= c.lost_near_m:
+                # 시야 이탈로 인한 정상 상실은 무시각 전진으로 잇는다. 단 마지막
+                # 관측이 틀어져 있었다면 그대로 밀면 비뚤게 박는다. 그렇다고 벽
+                # 코앞에서 탐색을 돌리는 것도 무의미하다 — 멈추고 이유를 남긴다.
+                if self._last_aligned:
+                    self._enter_blind(self._last_z, forward_m)
+                    return self._do_blind_push(forward_m, now_s)
+                return self._stop("lost_misaligned", "ABORT")
             self.phase = "SEARCH"
             self._yaw0 = None
             self._target_i = 0
@@ -300,6 +351,8 @@ class MarkerApproach:
             self._step_err0 = None
             self._settle_until = 0.0
             self._align_since = None     # 다음 정렬 시도는 시간을 새로 받는다
+            self._align_best = None
+            self._aligned_run = 0
             self._last_aligned = False
             self._reset_steering()
             return Cmd(0.0, 0.0, "SEARCH", False, "lost_far")

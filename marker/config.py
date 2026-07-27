@@ -38,6 +38,9 @@ class MarkerDriveConfig:
     pose_kp_yaw: float = 1.0
     pose_kp_lat: float = 1.5
     pose_axis_tol_m: float = 0.08
+    aligned_frames_needed: int = 3   # 이만큼 연속으로 정렬돼야 무시각 전진에 들어간다.
+    #   한 프레임만 보면 근거리의 불안정한 코너 추정 한 번에 눈 감고 밀기 시작한다.
+    align_progress_eps: float = 0.05  # 정렬 오차가 이만큼도 안 줄면 '수렴 안 함'으로 본다.
     pose_yaw_tol_deg: float = 8.0   # 정렬 완료 판정에 yaw 도 포함한다.
     #   lateral 만 보면 yaw 가 30° 틀어진 채로 무시각 구간에 진입한다.
     yaw_offset_deg: float = 0.0     # 카메라가 로봇 정면에서 틀어져 달린 만큼 뺀다.
@@ -68,8 +71,11 @@ class MarkerDriveConfig:
 
     # --- 안전 ---
     timeout_s: float = 60.0
-    no_progress_s: float = 2.5
-    align_stall_s: float = 5.0
+    no_progress_s: float = 2.5      # 전진 명령을 내는데 odom 이 안 늘면 막힌 것이다
+    align_stall_s: float = 8.0      # **오차가 줄지 않은 채로** 이만큼 지나면 포기.
+    #   경과 시간이 아니라 진전 없음을 잰다. 45°를 steer_ang_max(0.08rad/s)로 8° 안까지
+    #   줄이려면 8.1초가 필요한데, 경과 시간으로 자르면 정상 수렴을 중단시킨다.
+    sensor_timeout_s: float = 0.4   # /odom·/scan 이 이보다 오래 끊기면 고장으로 본다
     loop_hz: float = 12.0
 
     def clamped(self) -> "MarkerDriveConfig":
@@ -94,6 +100,9 @@ class MarkerDriveConfig:
             pose_kp_lat=_clamp(self.pose_kp_lat, 0.0, 5.0),
             pose_axis_tol_m=_clamp(self.pose_axis_tol_m, 0.005, 0.4),
             pose_yaw_tol_deg=_clamp(self.pose_yaw_tol_deg, 1.0, 45.0),
+            aligned_frames_needed=int(_clamp(self.aligned_frames_needed, 1, 30)),
+            align_progress_eps=_clamp(self.align_progress_eps, 0.0, 1.0),
+            sensor_timeout_s=_clamp(self.sensor_timeout_s, 0.1, 5.0),
             yaw_offset_deg=_clamp(self.yaw_offset_deg, -45.0, 45.0),
             stop_m=_clamp(self.stop_m, 0.02, 1.0),
             front_offset_m=_clamp(self.front_offset_m, 0.0, 0.5),
@@ -101,7 +110,9 @@ class MarkerDriveConfig:
             lin_homing=_clamp(self.lin_homing, 0.02, 0.25),
             lin_pulse=_clamp(self.lin_pulse, 0.02, 0.25),
             ang_search=_clamp(self.ang_search, 0.05, 1.0),
-            move_pulse_s=_clamp(self.move_pulse_s, 0.02, 1.0),
+            # 펄스는 명령 사이 간격보다 짧을 수 없다 — /cmd_vel 은 다음 명령이 올 때까지
+            # 유지되므로, 한 틱보다 짧게 잡으면 설정값과 실제 이동이 어긋난다.
+            move_pulse_s=_clamp(self.move_pulse_s, 2.0 / _clamp(self.loop_hz, 2.0, 30.0), 1.0),
             move_pause_s=_clamp(self.move_pause_s, 0.0, 3.0),
             turn_pause_s=_clamp(self.turn_pause_s, 0.0, 3.0),
             search_step_deg=_clamp(self.search_step_deg, 1.0, 90.0),

@@ -31,6 +31,10 @@ from .odom import OdomTracker
 from .scan import ScanWatch
 
 
+_D = MarkerDriveConfig()      # argparse 기본값의 유일한 출처. 여기 값을 복사해 두면
+#                              설정을 고쳐도 CLI 는 옛 값으로 도는 조용한 분기가 생긴다.
+
+
 def _parse(argv):
     ap = argparse.ArgumentParser(description="ArUco 마커 주행 (nav2 미사용)")
     ap.add_argument("mode", choices=["drive", "detect", "stop"])
@@ -40,26 +44,34 @@ def _parse(argv):
     ap.add_argument("--rotate", type=int, default=180, choices=[0, 90, 180, 270])
     ap.add_argument("--scan-dicts", dest="scan_dicts", action="store_true",
                     help="detect 모드에서 어떤 사전의 마커인지 훑어본다")
-    ap.add_argument("--marker-id", type=int, default=1)
-    ap.add_argument("--marker-m", type=float, default=0.07)
-    ap.add_argument("--dict", dest="dict_name", default="DICT_5X5_100")
-    ap.add_argument("--stop-m", type=float, default=0.10, help="마커~로봇 최전방 목표")
-    ap.add_argument("--front-offset", type=float, default=0.0, help="카메라~로봇 최전방")
-    ap.add_argument("--steer-sign", type=float, default=1.0, help="반대로 돌면 -1")
-    ap.add_argument("--axis-gate", type=float, default=0.6, help="yaw 신뢰 시작 거리")
-    ap.add_argument("--yaw-offset-deg", dest="yaw_offset_deg", type=float, default=0.0,
+    ap.add_argument("--marker-id", type=int, default=_D.marker_id)
+    ap.add_argument("--marker-m", type=float, default=_D.marker_len_m)
+    ap.add_argument("--dict", dest="dict_name", default=_D.dict_name)
+    ap.add_argument("--stop-m", type=float, default=_D.stop_m, help="마커~로봇 최전방 목표")
+    ap.add_argument("--front-offset", type=float, default=_D.front_offset_m, help="카메라~로봇 최전방")
+    ap.add_argument("--steer-sign", type=float, default=_D.steer_sign, help="반대로 돌면 -1")
+    ap.add_argument("--axis-gate", type=float, default=_D.axis_gate_m, help="yaw 신뢰 시작 거리")
+    ap.add_argument("--yaw-offset-deg", dest="yaw_offset_deg", type=float, default=_D.yaw_offset_deg,
                     help="카메라가 로봇 정면에서 틀어져 달린 각도(현장 실측)")
-    ap.add_argument("--pose-yaw-tol", dest="pose_yaw_tol", type=float, default=8.0,
+    ap.add_argument("--pose-yaw-tol", dest="pose_yaw_tol", type=float, default=_D.pose_yaw_tol_deg,
                     help="정렬 완료로 볼 yaw 오차 한계(도)")
-    ap.add_argument("--scan-guard", dest="scan_guard", type=float, default=0.06,
+    ap.add_argument("--scan-guard", dest="scan_guard", type=float, default=_D.scan_guard_m,
                     help="원본 /scan 전방이 이보다 가까우면 즉시 정지(m)")
-    ap.add_argument("--lin-homing", type=float, default=0.12)
-    ap.add_argument("--lin-pulse", type=float, default=0.08)
-    ap.add_argument("--ang-search", type=float, default=0.35)
-    ap.add_argument("--search-step-deg", type=float, default=20.0)
-    ap.add_argument("--search-span-deg", type=float, default=60.0)
-    ap.add_argument("--timeout", type=float, default=60.0)
-    ap.add_argument("--loop-hz", type=float, default=12.0)
+    ap.add_argument("--lin-homing", type=float, default=_D.lin_homing)
+    ap.add_argument("--lin-pulse", type=float, default=_D.lin_pulse)
+    ap.add_argument("--ang-search", type=float, default=_D.ang_search)
+    ap.add_argument("--steer-ang-max", dest="steer_ang_max", type=float,
+                    default=_D.steer_ang_max,
+                    help="조향 각속도 상한(rad/s). 축 이탈을 못 지우고 도착하면 올린다")
+    ap.add_argument("--pose-kp-lat", dest="pose_kp_lat", type=float, default=_D.pose_kp_lat,
+                    help="축 정렬의 교차오차 이득")
+    ap.add_argument("--sensor-timeout", dest="sensor_timeout", type=float,
+                    default=_D.sensor_timeout_s,
+                    help="/odom·/scan 이 이보다 오래 끊기면 고장으로 보고 정지한다")
+    ap.add_argument("--search-step-deg", type=float, default=_D.search_step_deg)
+    ap.add_argument("--search-span-deg", type=float, default=_D.search_span_deg)
+    ap.add_argument("--timeout", type=float, default=_D.timeout_s)
+    ap.add_argument("--loop-hz", type=float, default=_D.loop_hz)
     ap.add_argument("--cmd-topic", default="/cmd_vel")
     ap.add_argument("--sensor-wait", type=float, default=5.0,
                     help="drive 모드에서 /odom·/scan 이 들어올 때까지 기다리는 최대 초")
@@ -73,7 +85,9 @@ def _config(a) -> MarkerDriveConfig:
         axis_gate_m=a.axis_gate, yaw_offset_deg=a.yaw_offset_deg,
         pose_yaw_tol_deg=a.pose_yaw_tol, scan_guard_m=a.scan_guard,
         lin_homing=a.lin_homing, lin_pulse=a.lin_pulse,
-        ang_search=a.ang_search, search_step_deg=a.search_step_deg,
+        ang_search=a.ang_search, steer_ang_max=a.steer_ang_max,
+        pose_kp_lat=a.pose_kp_lat, sensor_timeout_s=a.sensor_timeout,
+        search_step_deg=a.search_step_deg,
         search_span_deg=a.search_span_deg, timeout_s=a.timeout, loop_hz=a.loop_hz,
     ).clamped()
 
@@ -133,7 +147,17 @@ def main(argv=None) -> int:
             print(f"[센서] odom_ready={odom.ready} scan_ready={watch.ready}")
 
         while rclpy.ok():
-            rclpy.spin_once(node, timeout_sec=0.0)
+            # 콜백을 한 번만 돌리면 20Hz 센서가 12Hz 루프보다 빨라 큐가 밀린다.
+            for _ in range(4):
+                rclpy.spin_once(node, timeout_sec=0.0)
+            if a.mode == "drive":
+                stale = [name for name, age in (("/odom", odom.age()), ("/scan", watch.age()))
+                         if age > cfg.sensor_timeout_s]
+                if stale:
+                    _publish(pub, 0.0, 0.0)
+                    print(f"[error] 센서가 {cfg.sensor_timeout_s:.2f}초 넘게 끊겼다: "
+                          f"{', '.join(stale)} — 정지한다")
+                    return 4
             frame = cam.get_frame()
             if frame is None:
                 _publish(pub, 0.0, 0.0)

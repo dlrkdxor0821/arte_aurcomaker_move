@@ -182,10 +182,26 @@ def test_yaw_misalignment_blocks_blind_push():
     assert abs(c.angular) > 0
 
 
-def test_aligned_and_near_enters_blind_push():
-    m = _to_axis_align(MarkerDriveConfig(pose_yaw_tol_deg=8.0, lost_near_m=0.25))
-    c = step(m, obs(0.24, yaw=2.0, lat=0.01), t=0.2)
-    assert c.phase == "BLIND_PUSH"
+def test_blind_push_needs_consecutive_aligned_frames():
+    """한 프레임 튄 값에 눈을 감고 밀기 시작하면 안 된다 — 연속으로 맞아야 넘어간다."""
+    cfg = MarkerDriveConfig(pose_yaw_tol_deg=8.0, lost_near_m=0.25,
+                            aligned_frames_needed=3)
+    m = _to_axis_align(cfg)
+    step(m, obs(0.24, yaw=30.0, lat=0.15), t=0.15)         # 먼저 틀어진 프레임(카운트 0)
+    good = obs(0.24, yaw=2.0, lat=0.01)
+    assert step(m, good, t=0.2).phase == "AXIS_ALIGN"      # 1회
+    assert step(m, good, t=0.3).phase == "AXIS_ALIGN"      # 2회
+    assert step(m, good, t=0.4).phase == "BLIND_PUSH"      # 3회째에 진입
+
+
+def test_one_noisy_aligned_frame_does_not_start_blind_push():
+    cfg = MarkerDriveConfig(pose_yaw_tol_deg=8.0, lost_near_m=0.25,
+                            aligned_frames_needed=3, align_stall_s=100.0)
+    m = _to_axis_align(cfg)
+    step(m, obs(0.24, yaw=30.0, lat=0.15), t=0.2)          # 틀어짐
+    step(m, obs(0.24, yaw=2.0, lat=0.01), t=0.3)           # 한 번 튀어서 맞음
+    c = step(m, obs(0.24, yaw=25.0, lat=0.12), t=0.4)      # 다시 틀어짐
+    assert c.phase == "AXIS_ALIGN"
 
 
 def test_align_stall_aborts_on_lateral():
@@ -339,17 +355,27 @@ def test_finished_machine_keeps_returning_zero():
 
 # ------------------------------------------------- codex 적대적 리뷰 회귀 테스트
 
-def test_loss_while_misaligned_does_not_enter_blind_push():
-    """보이는 동안엔 yaw 를 확인하는데 상실 경로가 그 검사를 우회하면 안 된다.
+def test_loss_while_misaligned_stops_instead_of_pushing_blind():
+    """45° 틀어진 채로 마커를 잃으면 그대로 밀지 않는다.
 
-    45° 틀어진 채로 마커를 잃고 무시각 직진에 들어가면 비뚤게 박는다.
+    벽 코앞에서 탐색을 돌리는 것도 무의미하므로 멈추고 이유를 남긴다.
     """
     m = _to_axis_align(MarkerDriveConfig(lost_grace=1, lost_near_m=0.25,
                                          align_stall_s=100.0))
     step(m, obs(0.18, yaw=45.0, lat=0.15), t=0.2)
     c = step(m, t=0.3)
-    assert c.phase != "BLIND_PUSH"
-    assert c.phase == "SEARCH"
+    assert c.phase == "ABORT" and c.reason == "lost_misaligned"
+
+
+def test_loss_inside_stop_distance_counts_as_arrival():
+    """목표 거리 안에서 마커가 시야를 벗어난 것은 도착이지 실패가 아니다."""
+    # 정렬돼 있으면 보이는 그 프레임에서 이미 완료되므로, 아직 안 끝난 상태를
+    # 만들려면 틀어진 채로 목표 거리에 있어야 한다(제자리 정렬 중).
+    m = _to_axis_align(MarkerDriveConfig(lost_grace=1, stop_m=0.10, front_offset_m=0.0,
+                                         align_stall_s=100.0))
+    assert step(m, obs(0.095, yaw=30.0), t=0.2).reason == "final_align"
+    c = step(m, t=0.3)
+    assert c.done and c.phase == "DONE" and c.reason == "reached"
 
 
 def test_stop_distance_while_misaligned_rotates_instead_of_finishing():
@@ -362,15 +388,23 @@ def test_stop_distance_while_misaligned_rotates_instead_of_finishing():
     assert c.linear == 0.0 and abs(c.angular) > 0
 
 
-def test_align_stall_budget_resets_after_an_aligned_frame():
-    """한 번 맞았다가 다시 틀어지면 정렬 예산을 새로 받아야 한다."""
-    # z 는 lost_near_m(0.25) 보다 멀게 둔다 — 가까우면 정렬된 순간 정상적으로
-    # BLIND_PUSH 로 넘어가 버려서 이 테스트가 검증하려는 지점을 못 본다.
-    m = _to_axis_align(MarkerDriveConfig(align_stall_s=0.5, pose_yaw_tol_deg=8.0))
-    step(m, obs(0.40, yaw=45.0), t=0.5)            # 미정렬
-    step(m, obs(0.40, yaw=1.0, lat=0.0), t=0.55)   # 정렬됨 → 예산 갱신
-    c = step(m, obs(0.40, yaw=45.0), t=0.70)       # 다시 미정렬(0.15s 경과)
-    assert c.phase == "AXIS_ALIGN"
+def test_align_stall_allows_slow_but_real_convergence():
+    """오차가 계속 줄고 있으면 시간이 오래 걸려도 중단하면 안 된다.
+
+    45°를 steer_ang_max(0.08rad/s)로 8° 안까지 줄이려면 8.1초가 필요하다.
+    경과 시간으로 자르는 판정은 이 정상 수렴을 죽인다.
+    """
+    m = _to_axis_align(MarkerDriveConfig(align_stall_s=1.0, pose_yaw_tol_deg=8.0,
+                                         align_progress_eps=0.05))
+    c = None
+    yaw = 45.0
+    for i in range(30):                    # 매 프레임 조금씩 좋아진다
+        yaw -= 1.0
+        # 로봇은 실제로 조금씩 전진한다 — 안 그러면 무진전 감시(blocked)에 걸린다
+        c = step(m, obs(0.40, yaw=yaw), t=0.2 + 0.5 * i, fwd=0.01 * i)
+        if c.done:
+            break
+    assert c.phase == "AXIS_ALIGN", f"{c.phase}/{c.reason}"
 
 
 def test_align_stall_timer_does_not_leak_across_search():

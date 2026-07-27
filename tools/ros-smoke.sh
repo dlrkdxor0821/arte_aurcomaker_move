@@ -109,6 +109,7 @@ echo "      drive 종료코드=$DRIVE_RC"
 tail -2 "$WORK/drive.log" | sed 's/^/      /'
 sed 's/^/      /' "$WORK/sink.log"
 
+[ "$DRIVE_RC" = "0" ] || { echo "FAIL: drive 종료코드가 0 이 아니다($DRIVE_RC)"; exit 1; }
 grep -q "\[ok\] 도착" "$WORK/drive.log" || { echo "FAIL: DONE 까지 못 감"; exit 1; }
 grep -q "moving=[1-9]" "$WORK/sink.log" || { echo "FAIL: /cmd_vel 이 안 나갔다"; exit 1; }
 grep -q "last=(0.0, 0.0)" "$WORK/sink.log" || { echo "FAIL: 종료 시 정지 명령이 없다"; exit 1; }

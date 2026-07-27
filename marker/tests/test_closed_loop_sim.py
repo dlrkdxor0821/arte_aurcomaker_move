@@ -156,10 +156,25 @@ def test_flipping_steer_sign_recovers_from_reversed_hardware():
 
 def test_converges_from_larger_offset():
     """더 크게 벗어난 자리에서도 축에 올라타 도착한다."""
-    cmd, robot, _ = run_sim(start=(0.25, 1.1, 0.0))
+    cmd, robot, _ = run_sim(start=(0.18, 1.2, 0.0))
     assert cmd.done and cmd.phase == "DONE", f"{cmd.phase}/{cmd.reason}"
     assert abs(robot.dist - 0.10) < 0.04
     assert abs(robot.lat) < 0.08
+
+
+def test_too_large_offset_fails_safely_instead_of_docking_crooked():
+    """활주로가 모자라면 비뚤게 도착하지 않고 멈춘다.
+
+    기본 게인(steer_ang_max 0.08rad/s)으로는 1.1m 거리에서 25cm 이탈을 다 못 지운다.
+    그 경우 조용히 비뚤게 붙는 것보다 이유를 남기고 서는 편이 낫다.
+    현장에서 이 증상이 보이면 출발 위치를 축에 가깝게 잡거나 게인을 올린다.
+    """
+    cmd, robot, _ = run_sim(start=(0.25, 1.1, 0.0))
+    assert cmd.done
+    if cmd.phase == "DONE":                      # 도착했다면 비뚤지 않아야 한다
+        assert abs(robot.lat) < 0.08, f"비뚤게 도착 lat={robot.lat:+.3f}"
+    else:
+        assert cmd.reason in ("lost_misaligned", "align_stall"), cmd.reason
 
 
 def test_scan_guard_stops_before_the_wall():

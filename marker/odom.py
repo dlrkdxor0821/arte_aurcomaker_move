@@ -5,6 +5,7 @@
 돌아오지 않는다.
 """
 import math
+import time
 
 from nav_msgs.msg import Odometry
 from rclpy.qos import qos_profile_sensor_data
@@ -32,9 +33,14 @@ class OdomTracker:
         self.yaw_deg = 0.0
         self.forward_m = 0.0
         self.ready = False
+        self._last_t = None
         self._prev_yaw = None
         self._prev_xy = None
         node.create_subscription(Odometry, topic, self._on_odom, qos_profile_sensor_data)
+
+    def age(self) -> float:
+        """마지막 odom 이 들어온 뒤 흐른 시간(초). 한 번도 없으면 무한대."""
+        return float("inf") if self._last_t is None else time.monotonic() - self._last_t
 
     def _on_odom(self, msg) -> None:
         p = msg.pose.pose.position
@@ -52,4 +58,5 @@ class OdomTracker:
             # 현재 헤딩에 투영 → 옆으로 밀린 성분은 빠지고, 뒤로 간 만큼은 차감된다.
             self.forward_m += dx * math.cos(yaw) + dy * math.sin(yaw)
         self._prev_xy = (p.x, p.y)
+        self._last_t = time.monotonic()
         self.ready = True
