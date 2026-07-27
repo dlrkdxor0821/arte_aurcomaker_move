@@ -47,6 +47,12 @@ def _parse(argv):
     ap.add_argument("--front-offset", type=float, default=0.0, help="카메라~로봇 최전방")
     ap.add_argument("--steer-sign", type=float, default=1.0, help="반대로 돌면 -1")
     ap.add_argument("--axis-gate", type=float, default=0.6, help="yaw 신뢰 시작 거리")
+    ap.add_argument("--yaw-offset-deg", dest="yaw_offset_deg", type=float, default=0.0,
+                    help="카메라가 로봇 정면에서 틀어져 달린 각도(현장 실측)")
+    ap.add_argument("--pose-yaw-tol", dest="pose_yaw_tol", type=float, default=8.0,
+                    help="정렬 완료로 볼 yaw 오차 한계(도)")
+    ap.add_argument("--scan-guard", dest="scan_guard", type=float, default=0.06,
+                    help="원본 /scan 전방이 이보다 가까우면 즉시 정지(m)")
     ap.add_argument("--lin-homing", type=float, default=0.12)
     ap.add_argument("--lin-pulse", type=float, default=0.08)
     ap.add_argument("--ang-search", type=float, default=0.35)
@@ -64,7 +70,9 @@ def _config(a) -> MarkerDriveConfig:
     return MarkerDriveConfig(
         marker_id=a.marker_id, marker_len_m=a.marker_m, dict_name=a.dict_name,
         stop_m=a.stop_m, front_offset_m=a.front_offset, steer_sign=a.steer_sign,
-        axis_gate_m=a.axis_gate, lin_homing=a.lin_homing, lin_pulse=a.lin_pulse,
+        axis_gate_m=a.axis_gate, yaw_offset_deg=a.yaw_offset_deg,
+        pose_yaw_tol_deg=a.pose_yaw_tol, scan_guard_m=a.scan_guard,
+        lin_homing=a.lin_homing, lin_pulse=a.lin_pulse,
         ang_search=a.ang_search, search_step_deg=a.search_step_deg,
         search_span_deg=a.search_span_deg, timeout_s=a.timeout, loop_hz=a.loop_hz,
     ).clamped()
@@ -154,9 +162,8 @@ def main(argv=None) -> int:
 
             o = detect_marker(frame, K, dist, marker_len_m=cfg.marker_len_m,
                               target_id=cfg.marker_id, dict_name=cfg.dict_name)
-            cmd = machine.step(o, yaw_deg=odom.yaw_deg, travel_m=odom.travel_m,
-                               pos_xy=odom.pos_xy, front_m=watch.front_m,
-                               now_s=time.monotonic())
+            cmd = machine.step(o, yaw_deg=odom.yaw_deg, forward_m=odom.forward_m,
+                               front_m=watch.front_m, now_s=time.monotonic())
             _publish(pub, cmd.linear, cmd.angular)
             print(f"[{cmd.phase:<10}] lin={cmd.linear:+.3f} ang={cmd.angular:+.3f} "
                   f"reason={cmd.reason}")

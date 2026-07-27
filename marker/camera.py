@@ -49,12 +49,13 @@ def _open_csi(width: int, height: int) -> Camera:
     return Camera(cam.capture_array, cam.stop)
 
 
-def _open_usb(index: int, width: int, height: int) -> Camera:
-    cap = cv2.VideoCapture(index)
+def _open_capture(target, width: int, height: int, label: str) -> Camera:
+    """VideoCapture 로 여는 모든 소스(USB 인덱스 / 영상 파일) 공통 경로."""
+    cap = cv2.VideoCapture(target)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
     if not cap.isOpened():
-        raise SystemExit(f"카메라를 열 수 없다: index={index}")
+        raise SystemExit(f"영상 소스를 열 수 없다: {label}")
 
     def read():
         ok, frame = cap.read()
@@ -65,11 +66,20 @@ def _open_usb(index: int, width: int, height: int) -> Camera:
 
 def open_camera(source: str = "csi", *, width: int = 640, height: int = 480,
                 rotate: int = 180) -> Camera:
-    """source: 'csi' 또는 USB 장치 인덱스 문자열('0', '1', ...).
+    """source: 'csi' | USB 장치 인덱스('0', '1', ...) | 영상 파일 경로.
+
+    영상 파일도 받는 이유: 실기 없이 같은 제어 루프를 그대로 돌려볼 수 있고,
+    현장에서 찍어 온 영상으로 게이트·극성을 다시 맞출 수 있다. 프레임이 끝나면
+    get_frame() 이 None 을 돌려주므로 호출부가 정상 종료한다.
 
     rotate 기본 180 은 이 Pi 의 CSI 카메라가 거꾸로 장착돼 있기 때문이며,
     config/camera/picam_640x480_rot180.npz 가 그 상태로 캘리브된 것이다.
     """
-    cam = _open_csi(width, height) if source == "csi" else _open_usb(int(source), width, height)
+    if source == "csi":
+        cam = _open_csi(width, height)
+    elif source.isdigit():
+        cam = _open_capture(int(source), width, height, f"USB index={source}")
+    else:
+        cam = _open_capture(source, width, height, f"file={source}")
     cam._rotate = rotate
     return cam

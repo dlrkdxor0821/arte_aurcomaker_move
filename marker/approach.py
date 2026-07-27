@@ -67,7 +67,8 @@ class MarkerApproach:
         self._pulse_until = 0.0      # 펄스 전진 종료 시각
         self._pulse_next = 0.0       # 다음 펄스 시작 가능 시각
         self._blind_target = None    # 무시각 전진 목표 거리(m)
-        self._blind_pos0 = None      # 무시각 전진 시작 위치(x, y)
+        self._blind_fwd0 = None      # 무시각 전진 기준점(전진 누적값)
+        self._fwd_at_obs = None      # 마지막 유효 관측 시점의 전진 누적값
         self._progress_ref = None    # (진행거리, 시각) — 무진전 판정 기준
         self._align_since = None     # **연속 미정렬**이 시작된 시각
         self._last_aligned = False   # 마지막 관측이 정렬 상태였나(상실 경로 판단용)
@@ -160,7 +161,7 @@ class MarkerApproach:
     def _do_homing(self, o: MarkerObs, dt: float) -> Cmd:
         return Cmd(self.cfg.lin_homing, self._steer(o.ex, dt), "HOMING", False, "approach")
 
-    def _do_axis_align(self, o: MarkerObs, now_s: float, pos_xy) -> Cmd:
+    def _do_axis_align(self, o: MarkerObs, now_s: float, forward_m: float) -> Cmd:
         c = self.cfg
         aligned = self._aligned(o)
         self._last_aligned = aligned
@@ -171,10 +172,16 @@ class MarkerApproach:
             self._align_since = now_s
         if not aligned and now_s - self._align_since > c.align_stall_s:
             return self._stop("align_stall", "ABORT")
-        # heading(yaw) 과 lateral 을 함께 줄여 마커 법선축에 올라탄다.
-        # 두 항의 부호는 합성 사시 렌더로 실측 확인했다(같은 부호 = 보강).
-        u = c.pose_kp_yaw * (self._yaw(o) / 90.0) + c.pose_kp_lat * o.lateral_m
-        ang = -c.steer_sign * max(-c.steer_ang_max, min(c.steer_ang_max, u))
+        # 마커 법선축에 올라타는 라인추종 제어: **교차오차 − 헤딩오차**.
+        #
+        #   ω = k_lat·lateral − k_yaw·(yaw/90)
+        #
+        # 두 항을 더하면 안 된다. 관측상 yaw ≈ −(로봇 자세각)이라, 축 쪽으로 몸을
+        # 틀수록 yaw 가 같은 부호로 커진다. 더하면 회전이 자기 자신을 부추겨
+        # 계속 돌다가 마커를 시야 밖으로 날린다(폐루프 시뮬레이션에서 실제로 발산).
+        # 빼야 헤딩이 교차오차를 상쇄하는 지점에서 평형이 잡힌다.
+        u = c.pose_kp_lat * o.lateral_m - c.pose_kp_yaw * (self._yaw(o) / 90.0)
+        ang = c.steer_sign * max(-c.steer_ang_max, min(c.steer_ang_max, u))
         if o.z_m <= c.stop_m + c.front_offset_m:
             # 목표 거리에 닿았다. 정렬까지 됐으면 끝. 틀어져 있으면 **제자리 회전**으로
             # 마저 맞춘다(전진은 멈춘다) — 비뚤게 도착하면 거리가 맞아도 실패다.
@@ -182,7 +189,7 @@ class MarkerApproach:
                 return self._stop("reached", "DONE")
             return Cmd(0.0, ang, "AXIS_ALIGN", False, "final_align")
         if aligned and o.z_m <= c.lost_near_m:
-            self._enter_blind(o.z_m, pos_xy)
+            self._enter_blind(o.z_m, forward_m)
             return Cmd(0.0, 0.0, "BLIND_PUSH", False, "near")
         if now_s >= self._pulse_next:
             self._pulse_until = now_s + c.move_pulse_s
@@ -190,23 +197,30 @@ class MarkerApproach:
         lin = c.lin_pulse if now_s < self._pulse_until else 0.0
         return Cmd(lin, ang, "AXIS_ALIGN", False, "align")
 
-    def _enter_blind(self, last_z: float, pos_xy) -> None:
+    def _enter_blind(self, last_z: float, forward_m: float) -> None:
+        """무시각 전진 시작.
+
+        기준점은 진입 시점이 아니라 **마지막으로 마커를 본 시점**의 전진 누적값이다.
+        상실 유예(기본 8프레임) 동안 로봇이 관성으로 조금 더 가는데, 진입 시점을
+        기준 삼으면 그만큼 더 밀어 목표를 지나친다.
+        """
         c = self.cfg
         self.phase = "BLIND_PUSH"
         self._blind_target = max(0.0, last_z - (c.stop_m + c.front_offset_m))
-        self._blind_pos0 = pos_xy
+        self._blind_fwd0 = self._fwd_at_obs if self._fwd_at_obs is not None else forward_m
         self._progress_ref = None
 
-    def _do_blind_push(self, pos_xy, now_s: float) -> Cmd:
+    def _do_blind_push(self, forward_m: float, now_s: float) -> Cmd:
         """마커가 시야를 벗어난 마지막 구간을 odom 으로 간다.
 
-        누적 주행거리가 아니라 **시작점에서의 직선 변위**를 쓴다. 누적거리는
-        제자리 진동이나 회전으로도 늘어나서, 앞으로 안 갔는데 도달로 읽힌다.
+        **헤딩에 투영한 전진 성분**만 센다. 누적 경로 길이는 제자리 진동으로도 늘고,
+        시작점 대비 직선거리는 옆으로 밀린 거리까지 진행으로 세기 때문에, 앞으로
+        가지 않았는데 도달로 읽힌다.
         """
         c = self.cfg
-        if self._blind_pos0 is None:
-            self._blind_pos0 = pos_xy
-        gone = math.hypot(pos_xy[0] - self._blind_pos0[0], pos_xy[1] - self._blind_pos0[1])
+        if self._blind_fwd0 is None:
+            self._blind_fwd0 = forward_m
+        gone = forward_m - self._blind_fwd0
         if gone >= self._blind_target:
             return self._stop("reached", "DONE")
         if self._progress_ref is None:
@@ -220,13 +234,12 @@ class MarkerApproach:
         return Cmd(c.lin_pulse, 0.0, "BLIND_PUSH", False, "blind")
 
     # ---- 진입점 ----------------------------------------------------------
-    def step(self, obs: MarkerObs | None, *, yaw_deg: float, travel_m: float,
-             pos_xy: tuple[float, float], front_m: float | None, now_s: float) -> Cmd:
+    def step(self, obs: MarkerObs | None, *, yaw_deg: float, forward_m: float,
+             front_m: float | None, now_s: float) -> Cmd:
         """한 틱의 판단.
 
         yaw_deg : odom 누적 방위각(도, 좌회전 +)
-        travel_m: odom 누적 주행거리(m) — 진행 감시용
-        pos_xy  : odom 좌표 (x, y) — 무시각 구간의 직선 변위 계산용
+        forward_m: 헤딩에 투영한 부호 있는 전진 누적값(m) — 무시각 구간 거리 판정용
         front_m : 원본 /scan 전방 최소거리(m). 아직 스캔이 없으면 None
         now_s   : 단조 증가 초
         """
@@ -235,7 +248,7 @@ class MarkerApproach:
             self._t0 = now_s
         if self.phase in ("DONE", "ABORT"):
             return Cmd(0.0, 0.0, self.phase, True, "finished")
-        if not _finite(now_s, yaw_deg, travel_m, pos_xy[0], pos_xy[1]):
+        if not _finite(now_s, yaw_deg, forward_m):
             return self._stop("bad_odom", "ABORT")
         if now_s - self._t0 > c.timeout_s:
             return self._stop("timeout", "ABORT")
@@ -254,6 +267,7 @@ class MarkerApproach:
         if seen:
             self._lost = 0
             self._last_z = obs.z_m
+            self._fwd_at_obs = forward_m
             if self.phase in ("SEARCH", "HOMING"):
                 nxt = "AXIS_ALIGN" if obs.z_m <= c.axis_gate_m else "HOMING"
                 if nxt == "AXIS_ALIGN" and self.phase != "AXIS_ALIGN":
@@ -262,13 +276,13 @@ class MarkerApproach:
             if self.phase == "HOMING":
                 return self._do_homing(obs, dt)
             if self.phase == "AXIS_ALIGN":
-                return self._do_axis_align(obs, now_s, pos_xy)
+                return self._do_axis_align(obs, now_s, forward_m)
             if self.phase == "BLIND_PUSH":
-                return self._do_blind_push(pos_xy, now_s)
+                return self._do_blind_push(forward_m, now_s)
             return Cmd(0.0, 0.0, self.phase, False, "hold")
 
         if self.phase == "BLIND_PUSH":
-            return self._do_blind_push(pos_xy, now_s)
+            return self._do_blind_push(forward_m, now_s)
         if self.phase in ("HOMING", "AXIS_ALIGN"):
             self._lost += 1
             if self._lost < c.lost_grace:
@@ -277,8 +291,8 @@ class MarkerApproach:
             # 틀어져 있었다면 그대로 밀면 비뚤게 박는다 — 다시 찾는 편이 낫다.
             if (self._last_z is not None and self._last_z <= c.lost_near_m
                     and self._last_aligned):
-                self._enter_blind(self._last_z, pos_xy)
-                return self._do_blind_push(pos_xy, now_s)
+                self._enter_blind(self._last_z, forward_m)
+                return self._do_blind_push(forward_m, now_s)
             self.phase = "SEARCH"
             self._yaw0 = None
             self._target_i = 0

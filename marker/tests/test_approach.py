@@ -11,9 +11,9 @@ def obs(z, ex=0.0, yaw=0.0, lat=0.0, marker_id=1):
                      yaw_deg=yaw, lateral_m=lat, size_frac=0.1)
 
 
-def step(m, o=None, *, yaw=0.0, travel=0.0, pos=(0.0, 0.0), front=None, t=0.0):
-    """긴 키워드를 매번 쓰지 않기 위한 얇은 래퍼."""
-    return m.step(o, yaw_deg=yaw, travel_m=travel, pos_xy=pos, front_m=front, now_s=t)
+def step(m, o=None, *, yaw=0.0, fwd=0.0, front=None, t=0.0):
+    """긴 키워드를 매번 쓰지 않기 위한 얇은 래퍼. fwd = 전진 누적값(m)."""
+    return m.step(o, yaw_deg=yaw, forward_m=fwd, front_m=front, now_s=t)
 
 
 # ---------------------------------------------------------------- 탐색
@@ -237,11 +237,11 @@ def test_blind_push_travels_remaining_then_done():
                                          stop_m=0.10, front_offset_m=0.0))
     step(m, obs(0.5), t=0.0)
     step(m, obs(0.16), t=0.1)
-    c = step(m, t=0.2, pos=(0.0, 0.0))
+    c = step(m, t=0.2, fwd=0.0)
     assert c.phase == "BLIND_PUSH" and c.linear > 0
-    c = step(m, t=0.3, pos=(0.03, 0.0))
+    c = step(m, t=0.3, fwd=0.03)
     assert not c.done                       # 0.06 중 0.03 만 갔다
-    c = step(m, t=0.4, pos=(0.06, 0.0))
+    c = step(m, t=0.4, fwd=0.06)
     assert c.done and c.phase == "DONE"
 
 
@@ -252,13 +252,42 @@ def test_blind_push_uses_displacement_not_path_length():
                                          no_progress_s=100.0))
     step(m, obs(0.5), t=0.0)
     step(m, obs(0.16), t=0.1)
-    step(m, t=0.2, pos=(0.0, 0.0))
+    step(m, t=0.2, fwd=0.0)
     c = None
-    for i in range(10):                     # 0.02m 왕복 = 누적 0.4m, 변위 0
-        pos = (0.02, 0.0) if i % 2 == 0 else (0.0, 0.0)
-        c = step(m, t=0.3 + 0.1 * i, travel=0.4, pos=pos)
+    for i in range(10):                     # 앞뒤로 0.02m 왕복 = 누적 0.4m, 순전진 0
+        c = step(m, t=0.3 + 0.1 * i, fwd=0.02 if i % 2 == 0 else 0.0)
     assert not c.done
     assert c.phase == "BLIND_PUSH"
+
+
+def test_blind_push_ignores_sideways_motion():
+    """옆으로 밀린 거리는 전진이 아니다 — 벽까지 남은 거리가 줄지 않는다.
+
+    시작점 대비 직선거리로 재면 옆으로 6cm 밀린 것이 '도달'로 읽힌다.
+    """
+    m = MarkerApproach(MarkerDriveConfig(lost_grace=1, lost_near_m=0.25,
+                                         stop_m=0.10, front_offset_m=0.0,
+                                         no_progress_s=100.0))
+    step(m, obs(0.5), t=0.0)
+    step(m, obs(0.16), t=0.1)               # 남은 목표 0.06m
+    step(m, t=0.2, fwd=0.0)
+    c = step(m, t=0.3, fwd=0.0)             # 옆으로만 밀림 → 전진 성분 0
+    assert not c.done and c.phase == "BLIND_PUSH"
+
+
+def test_blind_push_subtracts_coasting_during_lost_grace():
+    """상실 유예 동안 관성으로 더 간 거리는 목표에서 빠져야 한다.
+
+    진입 시점을 기준 삼으면 그만큼 더 밀어 목표를 지나친다.
+    """
+    m = MarkerApproach(MarkerDriveConfig(lost_grace=3, lost_near_m=0.25,
+                                         stop_m=0.10, front_offset_m=0.0))
+    step(m, obs(0.5), t=0.0)
+    step(m, obs(0.16), t=0.1, fwd=0.00)     # 마지막 관측: 남은 목표 0.06m
+    step(m, t=0.2, fwd=0.02)                # 유예 중 관성 2cm
+    step(m, t=0.3, fwd=0.04)                # 유예 중 관성 총 4cm
+    c = step(m, t=0.4, fwd=0.06)            # 관측 시점 대비 6cm → 도달
+    assert c.done and c.phase == "DONE" and c.reason == "reached"
 
 
 def test_blind_push_blocked_when_no_progress():
@@ -267,7 +296,7 @@ def test_blind_push_blocked_when_no_progress():
     step(m, obs(0.18), t=0.1)
     c = None
     for i in range(10):
-        c = step(m, t=0.2 + 0.1 * i, pos=(0.0, 0.0))
+        c = step(m, t=0.2 + 0.1 * i, fwd=0.0)
         if c.done:
             break
     assert c.phase == "ABORT" and c.reason == "blocked"

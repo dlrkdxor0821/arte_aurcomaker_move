@@ -129,10 +129,11 @@ def test_oblique_lateral_sign_and_magnitude(dx):
 
 
 def test_oblique_yaw_and_lateral_agree_in_sign():
-    """조향식 u = kp_yaw*(yaw/90) + kp_lat*lateral 의 두 항이 상쇄하면 안 된다.
+    """사시 자세에서 yaw 와 lateral 은 **같은 부호**로 나온다.
 
-    물리적으로 일관된 사시 자세에서 두 항의 부호가 반대면, 축 정렬이 서로
-    싸우다 수렴하지 않는다. 실제 렌더로 측정해 확인한다.
+    이게 축 정렬 제어식이 `k_lat*lateral - k_yaw*(yaw/90)` 인 이유다(더하기 아님).
+    같은 부호라서 빼야 헤딩 항이 교차오차 항을 상쇄하고 평형이 잡힌다.
+    더하면 회전이 자기를 부추겨 마커를 시야 밖으로 날린다(폐루프 시뮬레이션에서 확인).
     """
     for dx in (-0.15, 0.15):
         o = observe(render_oblique(dx)[0])
