@@ -41,7 +41,8 @@ def _parse(argv):
     ap.add_argument("--source", default="csi", help="'csi' 또는 USB 인덱스('0')")
     ap.add_argument("--slot", default="front", choices=["front", "back"],
                     help="캘리브 선택 키")
-    ap.add_argument("--rotate", type=int, default=180, choices=[0, 90, 180, 270])
+    ap.add_argument("--rotate", type=int, default=180, choices=[0, 180],
+                    help="90/270 은 캘리브레이션이 같이 안 돌아 지원하지 않는다")
     ap.add_argument("--scan-dicts", dest="scan_dicts", action="store_true",
                     help="detect 모드에서 어떤 사전의 마커인지 훑어본다")
     ap.add_argument("--marker-id", type=int, default=_D.marker_id)
@@ -65,6 +66,9 @@ def _parse(argv):
                     help="조향 각속도 상한(rad/s). 축 이탈을 못 지우고 도착하면 올린다")
     ap.add_argument("--pose-kp-lat", dest="pose_kp_lat", type=float, default=_D.pose_kp_lat,
                     help="축 정렬의 교차오차 이득")
+    ap.add_argument("--scan-forward-deg", dest="scan_forward_deg", type=float, default=0.0,
+                    help="라이다 0rad 이 로봇 전방과 어긋난 각도. detect 가 찍는 "
+                         "frame_id 와 실제 방향을 보고 맞춘다")
     ap.add_argument("--sensor-timeout", dest="sensor_timeout", type=float,
                     default=_D.sensor_timeout_s,
                     help="/odom·/scan 이 이보다 오래 끊기면 고장으로 보고 정지한다")
@@ -126,7 +130,7 @@ def main(argv=None) -> int:
     K, dist = load_calib(a.slot)
     cam = open_camera(a.source, rotate=a.rotate)
     odom = OdomTracker(node)
-    watch = ScanWatch(node)
+    watch = ScanWatch(node, forward_deg=a.scan_forward_deg)
     machine = MarkerApproach(cfg)
     period = 1.0 / cfg.loop_hz
     print(f"[ok] mode={a.mode} source={a.source} slot={a.slot} id={cfg.marker_id} "
@@ -158,6 +162,12 @@ def main(argv=None) -> int:
                     print(f"[error] 센서가 {cfg.sensor_timeout_s:.2f}초 넘게 끊겼다: "
                           f"{', '.join(stale)} — 정지한다")
                     return 4
+                if not watch.valid:
+                    # 스캔은 제때 오는데 쓸 만한 값이 하나도 없다 = 라이다 고장.
+                    # front_m 은 그때도 None 이라 '전방이 트여 있음'과 구분이 안 된다.
+                    _publish(pub, 0.0, 0.0)
+                    print("[error] /scan 에 유효한 거리값이 하나도 없다 — 라이다 확인")
+                    return 4
             frame = cam.get_frame()
             if frame is None:
                 _publish(pub, 0.0, 0.0)
@@ -173,7 +183,8 @@ def main(argv=None) -> int:
                     o = detect_marker(frame, K, dist, marker_len_m=cfg.marker_len_m,
                                       target_id=cfg.marker_id, dict_name=cfg.dict_name)
                     front = f"{watch.front_m:.3f}m" if watch.front_m is not None else "--"
-                    status = f"odom_ready={odom.ready} scan_ready={watch.ready}"
+                    status = (f"odom_ready={odom.ready} scan_ready={watch.ready} "
+                              f"scan_valid={watch.valid} scan_frame={watch.frame_id}")
                     if o is None:
                         print(f"marker: --   scan_front={front}  {status}")
                     else:

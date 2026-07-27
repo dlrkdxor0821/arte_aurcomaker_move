@@ -4,11 +4,27 @@
 2026-07-06 실주행으로 맞춘 값을 옮겨 적은 것이다. 새로 지어낸 값이 아니므로
 근거 없이 바꾸지 않는다. 그 저장소를 임포트하지는 않는다(단독 실행 원칙).
 """
-from dataclasses import dataclass, replace
+import math
+from dataclasses import dataclass, fields, replace
 
 
 def _clamp(v, lo, hi):
     return lo if v < lo else (hi if v > hi else v)
+
+
+def _finite_or_default(cfg: "MarkerDriveConfig") -> "MarkerDriveConfig":
+    """NaN/inf 를 필드 기본값으로 되돌린다.
+
+    _clamp 는 NaN 을 못 막는다 — 모든 비교가 False 라 그대로 통과한다. 그러면
+    `--scan-guard nan` 한 번에 근접 보호와 센서 끊김 감지가 **조용히 꺼진다**
+    (`0.01 < NaN` 은 False, `age() > NaN` 도 False).
+    """
+    bad = {}
+    for f in fields(cfg):
+        v = getattr(cfg, f.name)
+        if isinstance(v, float) and not math.isfinite(v):
+            bad[f.name] = f.default
+    return replace(cfg, **bad) if bad else cfg
 
 
 @dataclass(frozen=True)
@@ -84,6 +100,7 @@ class MarkerDriveConfig:
         일부만 덮으면 덮이지 않은 필드로 상태기계를 마비시킬 수 있다.
         예: move_pulse_s=-1 이면 펄스 종료 시각이 과거라 전진 명령이 영영 안 나간다.
         """
+        self = _finite_or_default(self)
         return replace(
             self,
             marker_len_m=_clamp(self.marker_len_m, 0.005, 1.0),

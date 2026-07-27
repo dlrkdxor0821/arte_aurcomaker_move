@@ -436,3 +436,19 @@ def test_dt_uses_real_elapsed_time():
         f = step(fast, obs(1.5, ex=0.3), t=0.08 * i)
         s = step(slow, obs(1.5, ex=0.3), t=1.00 * i)
     assert abs(s.angular) > abs(f.angular)    # 느린 루프가 적분을 더 쌓는다
+
+
+def test_final_align_failure_is_not_reported_as_success():
+    """거리는 맞췄는데 정면각을 못 맞췄으면 성공이 아니다.
+
+    도킹 제어기가 이걸 DONE 으로 보고하면 거짓 성공이다 — 멈추되 실패로 남긴다.
+    """
+    m = _to_axis_align(MarkerDriveConfig(stop_m=0.10, front_offset_m=0.0,
+                                         pose_yaw_tol_deg=8.0, align_stall_s=0.2))
+    c = None
+    for i, t in enumerate((0.2, 0.3, 0.4, 0.51)):
+        yaw = 46.0 if i % 2 == 0 else 45.0     # 오차가 미세하게 진동한다
+        c = step(m, obs(0.09, yaw=yaw, lat=0.20), t=t)
+        if c.done:
+            break
+    assert c.phase == "ABORT" and c.reason == "final_align_failed"

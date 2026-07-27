@@ -21,11 +21,15 @@ class ScanWatch:
     마지막 값이 영원히 남아, 보호가 켜진 것처럼 보이는 채로 실제로는 꺼진다.
     """
 
-    def __init__(self, node, topic: str = "/scan", half_angle_deg: float = 15.0):
+    def __init__(self, node, topic: str = "/scan", half_angle_deg: float = 15.0,
+                 forward_deg: float = 0.0):
         self.front_m = None
         self.ready = False
+        self.valid = False          # 마지막 스캔에 쓸 만한 관측이 하나라도 있었나
+        self.frame_id = None        # 스캔이 어느 좌표계인지 — 전방 가정 확인용
         self._last_t = None
         self._half = math.radians(half_angle_deg)
+        self._forward = math.radians(forward_deg)
         node.create_subscription(LaserScan, topic, self._on_scan, qos_profile_sensor_data)
 
     def age(self) -> float:
@@ -38,15 +42,27 @@ class ScanWatch:
 
     def _on_scan(self, msg) -> None:
         best = None
+        seen_valid = False
         for i, r in enumerate(msg.ranges):
-            # LaserScan 규약: range_min~range_max 밖의 값은 무효다. 그 밖의 유한값을
-            # 그대로 믿으면 없는 장애물에 서게 된다.
+            # LaserScan 규약:
+            #   range_min~range_max 안의 유한값 = 실제 측정
+            #   +inf                          = 그 범위 안에 아무것도 없음(정상)
+            #   NaN, 범위 밖 유한값            = 무효
+            # inf 를 무효로 세면 탁 트인 공간을 라이다 고장으로 오판한다.
+            if math.isinf(r) and r > 0:
+                seen_valid = True
+                continue
             if not math.isfinite(r) or r < msg.range_min or r > msg.range_max:
                 continue
-            a = msg.angle_min + i * msg.angle_increment
+            seen_valid = True
+            a = msg.angle_min + i * msg.angle_increment - self._forward
             a = math.atan2(math.sin(a), math.cos(a))
             if abs(a) <= self._half and (best is None or r < best):
                 best = r
+        # front_m=None 은 두 가지 뜻이 될 수 있다: (a) 전방이 트여 있다(정상),
+        # (b) 라이다가 쓰레기만 뿜는다(고장). valid 로 그 둘을 갈라 준다.
+        self.valid = seen_valid
+        self.frame_id = getattr(getattr(msg, "header", None), "frame_id", None)
         self.front_m = best
         self._last_t = time.monotonic()
         self.ready = True

@@ -82,12 +82,13 @@
 | `blocked` | 전진 명령을 내는데 전진 거리가 안 늘어남 | 장애물·바퀴 걸림 |
 | `align_stall` | 정렬 오차가 줄지 않은 채 시간 초과 | 게인·마커 각도 확인 |
 | `lost_misaligned` | 근접에서 틀어진 채 마커를 놓침 | 축에 더 가깝게 출발하거나 `--steer-ang-max` 상향 |
+| `final_align_failed` | 목표 거리엔 닿았으나 정면각을 못 맞춤 | 같은 대응. 비뚤게 붙은 채 성공으로 보고하지 않는다 |
 | `scan_guard` | 전방 라이다가 `--scan-guard` 안쪽 | 목표 거리 재확인 |
 | `timeout` | 전체 시간 초과 | 위 원인들의 결과일 때가 많다 |
 | `bad_odom` | odom 값이 NaN/inf | 드라이버 확인 |
 
-`DONE` 의 이유는 `reached`(정상) 또는 `reached_skewed`(목표 거리에는 닿았으나 정면각을
-끝내 못 맞춤 — 도킹 품질을 확인할 것) 둘 중 하나다.
+`DONE` 의 이유는 `reached` 하나뿐이다. 목표 거리에 닿았는데 정면각을 끝내 못 맞추면
+`ABORT(final_align_failed)` 다 — 비뚤게 붙은 것을 성공으로 보고하지 않는다.
 
 ## 실기에서만 정해지는 값
 

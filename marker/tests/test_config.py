@@ -41,3 +41,20 @@ def test_value_types_are_frozen():
             assert "frozen" in type(exc).__name__.lower()
         else:
             raise AssertionError(f"{type(frozen).__name__} 이 frozen 이 아니다")
+
+
+def test_non_finite_values_fall_back_to_defaults():
+    """_clamp 는 NaN 을 못 막는다 — 모든 비교가 False 라 그대로 통과한다.
+
+    그러면 `--scan-guard nan` 한 번에 근접 보호와 센서 끊김 감지가 조용히 꺼진다
+    (0.01 < NaN 은 False, age() > NaN 도 False).
+    """
+    c = MarkerDriveConfig(scan_guard_m=float("nan"),
+                          sensor_timeout_s=float("nan"),
+                          stop_m=float("inf"),
+                          steer_kp=float("-inf")).clamped()
+    d = MarkerDriveConfig()
+    assert c.scan_guard_m == d.scan_guard_m
+    assert c.sensor_timeout_s == d.sensor_timeout_s
+    assert c.stop_m == d.stop_m
+    assert c.steer_kp == d.steer_kp

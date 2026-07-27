@@ -231,7 +231,9 @@ class MarkerApproach:
             if self._final_align_since is None:
                 self._final_align_since = now_s
             if now_s - self._final_align_since > c.align_stall_s:
-                return self._stop("reached_skewed", "DONE")
+                # 거리는 맞췄지만 정면각을 못 맞췄다. 도킹 제어기가 이걸 성공으로
+                # 보고하면 거짓 성공이다 — 멈추되 실패로 남긴다.
+                return self._stop("final_align_failed", "ABORT")
             return Cmd(0.0, ang, "AXIS_ALIGN", False, "final_align")
         # 근거리는 코너 추정이 가장 불안정한 구간이다. 한 프레임만 보고 눈을 감으면
         # 튄 값 하나에 비뚤게 밀고 들어간다 — 연속으로 맞아야 넘어간다.

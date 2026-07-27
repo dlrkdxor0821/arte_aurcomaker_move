@@ -10,8 +10,11 @@ CSI(picam)는 일반 VideoCapture 로 검은 화면만 나오므로 picamera2 �
 """
 import cv2
 
-_ROTATE = {90: cv2.ROTATE_90_CLOCKWISE, 180: cv2.ROTATE_180,
-           270: cv2.ROTATE_90_COUNTERCLOCKWISE}
+# 90/270 은 넣지 않는다. 픽셀만 돌리고 K(fx, fy, cx, cy)는 그대로 쓰게 되는데,
+# 그러면 가로·세로가 뒤바뀐 영상에 640x480 캘리브를 물려 좌우 오차가 통째로 틀어진다
+# (실측: 오른쪽 100px 치우친 마커가 회전 후 ex≈0, 즉 '정중앙'으로 읽힌다).
+# 세로 장착 카메라를 쓰려면 그 자세로 새로 캘리브해서 slot 을 추가해야 한다.
+_ROTATE = {180: cv2.ROTATE_180}
 
 
 class Camera:
@@ -75,6 +78,10 @@ def open_camera(source: str = "csi", *, width: int = 640, height: int = 480,
     rotate 기본 180 은 이 Pi 의 CSI 카메라가 거꾸로 장착돼 있기 때문이며,
     config/camera/picam_640x480_rot180.npz 가 그 상태로 캘리브된 것이다.
     """
+    if rotate not in (0, 180):
+        raise SystemExit(
+            f"--rotate {rotate} 는 지원하지 않는다(0 또는 180만).\n"
+            "90/270 은 영상만 돌고 캘리브레이션은 안 돌아서 좌우 오차가 틀어진다.")
     if source == "csi":
         cam = _open_csi(width, height)
     elif source.isdigit():

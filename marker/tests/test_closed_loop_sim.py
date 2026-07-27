@@ -174,7 +174,8 @@ def test_too_large_offset_fails_safely_instead_of_docking_crooked():
     if cmd.phase == "DONE":                      # 도착했다면 비뚤지 않아야 한다
         assert abs(robot.lat) < 0.08, f"비뚤게 도착 lat={robot.lat:+.3f}"
     else:
-        assert cmd.reason in ("lost_misaligned", "align_stall"), cmd.reason
+        assert cmd.reason in ("lost_misaligned", "align_stall",
+                              "final_align_failed"), cmd.reason
 
 
 def test_scan_guard_stops_before_the_wall():

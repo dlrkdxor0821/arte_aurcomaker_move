@@ -87,3 +87,34 @@ def test_age_resets_on_each_scan(scan_module):
     watch = feed(scan_module, [1.0] * 360)
     assert watch.ready is True
     assert watch.age() < 0.5
+
+
+# ------------------------------------------------- 고장난 라이다 구분
+
+def test_all_nan_scan_is_marked_invalid(scan_module):
+    """스캔은 제때 오는데 값이 전부 NaN = 라이다 고장.
+
+    front_m 은 그때도 None 이라 '전방이 트여 있음'과 구분이 안 된다.
+    이 구분이 없으면 고장난 심장박동을 건강으로 세고 전진한다.
+    """
+    watch = feed(scan_module, [float("nan")] * 360)
+    assert watch.ready is True          # 메시지는 왔다
+    assert watch.valid is False         # 그런데 쓸 값이 없다
+    assert watch.front_m is None
+
+
+def test_open_space_scan_is_valid(scan_module):
+    """전부 inf 는 '그 범위 안에 아무것도 없음'이라는 정상 관측이다."""
+    watch = feed(scan_module, [float("inf")] * 360)
+    assert watch.valid is True
+    assert watch.front_m is None        # 전방에 잡히는 게 없을 뿐
+
+
+def test_forward_offset_moves_the_watched_sector(scan_module):
+    """라이다가 180° 돌아 달렸으면 감시 섹터도 같이 돌아야 한다."""
+    ranges = [5.0] * 360
+    ranges[0] = 0.30                    # angle_min(-pi) 위치 = 오프셋 180°일 때의 전방
+    node = FakeNode()
+    watch = scan_module.ScanWatch(node, half_angle_deg=15.0, forward_deg=180.0)
+    node.cb(make_scan(ranges))
+    assert watch.front_m == pytest.approx(0.30)
