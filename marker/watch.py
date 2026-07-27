@@ -13,18 +13,22 @@ import cv2
 
 from .calib import load_calib
 from .camera import open_camera
+from .config import MarkerDriveConfig
 from .detect import detect_marker, scan_dicts
+
+_D = MarkerDriveConfig()      # 기본값의 유일한 출처 (drive.py 와 같은 이유)
 
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="마커 검출 관찰(모터 무접촉)")
     ap.add_argument("--source", default="0", help="'csi' 또는 USB 인덱스")
     ap.add_argument("--slot", default="back", choices=["front", "back"])
-    ap.add_argument("--rotate", type=int, default=0, choices=[0, 90, 180, 270])
-    ap.add_argument("--marker-id", type=int, default=1)
-    ap.add_argument("--marker-m", type=float, default=0.07)
-    ap.add_argument("--dict", dest="dict_name", default="DICT_5X5_100")
-    ap.add_argument("--stop-m", type=float, default=0.10)
+    ap.add_argument("--rotate", type=int, default=0, choices=[0, 180],
+                    help="90/270 은 캘리브레이션이 같이 안 돌아 지원하지 않는다")
+    ap.add_argument("--marker-id", type=int, default=_D.marker_id)
+    ap.add_argument("--marker-m", type=float, default=_D.marker_len_m)
+    ap.add_argument("--dict", dest="dict_name", default=_D.dict_name)
+    ap.add_argument("--stop-m", type=float, default=_D.stop_m)
     ap.add_argument("--scan-dicts", dest="scan_dicts", action="store_true")
     ap.add_argument("--no-window", action="store_true", help="창 없이 텍스트만")
     a = ap.parse_args(argv)
@@ -45,9 +49,7 @@ def main(argv=None) -> int:
             else:
                 obs = detect_marker(frame, K, dist, marker_len_m=a.marker_m,
                                     target_id=a.marker_id, dict_name=a.dict_name)
-                text = ("marker: --" if obs is None else
-                        f"z={obs.z_m:.3f}m ex={obs.ex:+.3f} yaw={obs.yaw_deg:+.1f} "
-                        f"lat={obs.lateral_m:+.3f} 남음={obs.z_m - a.stop_m:+.3f}m")
+                text = "marker: --" if obs is None else obs.describe(a.stop_m)
             print(text, flush=True)
             if not a.no_window:
                 cv2.putText(frame, text, (8, 24), cv2.FONT_HERSHEY_SIMPLEX, 0.6,

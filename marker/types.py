@@ -19,6 +19,12 @@ class MarkerObs:
     lateral_m: float
     size_frac: float
 
+    def describe(self, stop_m: float = 0.0) -> str:
+        """사람이 읽는 한 줄. drive 와 watch 가 같은 문장을 쓰도록 여기 둔다."""
+        return (f"z={self.z_m:.3f}m ex={self.ex:+.3f} yaw={self.yaw_deg:+.1f} "
+                f"lat={self.lateral_m:+.3f} size={self.size_frac:.2f} "
+                f"| 앞면까지 남음 {self.z_m - stop_m:+.3f}m")
+
 
 @dataclass(frozen=True)
 class Cmd:

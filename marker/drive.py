@@ -188,10 +188,8 @@ def main(argv=None) -> int:
                     if o is None:
                         print(f"marker: --   scan_front={front}  {status}")
                     else:
-                        remain = o.z_m - (cfg.stop_m + cfg.front_offset_m)
-                        print(f"marker: z={o.z_m:.3f}m ex={o.ex:+.3f} yaw={o.yaw_deg:+.1f} "
-                              f"lat={o.lateral_m:+.3f} size={o.size_frac:.2f} | "
-                              f"앞면까지 남음 {remain:+.3f}m  scan_front={front}  {status}")
+                        print(f"marker: {o.describe(cfg.stop_m + cfg.front_offset_m)}"
+                              f"  scan_front={front}  {status}")
                 time.sleep(max(period, 0.5))
                 continue
 
