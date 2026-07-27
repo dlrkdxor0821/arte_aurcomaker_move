@@ -1,5 +1,10 @@
 # 마커 주행(ArUco Marker Drive) 1단계 Implementation Plan
 
+> ⚠️ **이 문서는 착수 시점의 계획이며, 구현 도중 여러 결정이 뒤집혔다.**
+> 현재 동작의 정본은 `README.md` 와 `docs/design-marker-drive.md`(“구현하며 확정·수정된 것”
+> 절)이다. 특히 축 정렬 제어식의 부호, 무시각 구간 거리 측정, 정렬 판정, 센서 신선도는
+> 여기 적힌 코드와 다르다. 이 파일은 어떤 순서로 무엇을 세웠는지를 남기는 이력이다.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** ArUco 마커 한 장을 보고 마커 앞 10cm(로봇 최전방 기준)에 정지하는 주행 코어를, 다른 스택에 의존하지 않는 단독 실행 CLI 로 만든다.

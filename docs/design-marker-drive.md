@@ -190,8 +190,10 @@ steer_sign +1                         (:58, 2026-07-06 현장 재검증)
 |---|---|
 | 마커 상실 | 8프레임 유예 후 위 분기 |
 | 전체 시간 초과 | 60초 → `ABORT(timeout)` |
-| 전진 무진전 2.5초 | `ABORT(blocked)` |
-| 정렬 미수렴 5초 | `ABORT(align_stall)` |
+| 전진 무진전 2.5초 | `ABORT(blocked)` — 전진을 **명령하는 동안**만 잰다 |
+| 정렬 오차가 8초간 안 줄어듦 | `ABORT(align_stall)` — 경과 시간이 아니라 진전 없음 기준 |
+| 근접에서 틀어진 채 상실 | `ABORT(lost_misaligned)` |
+| `/odom`·`/scan` 0.4초 끊김 | 정지 후 종료코드 4 |
 | 원본 `/scan` 전방 6cm 미만 | 즉시 정지 `ABORT(scan_guard)` |
 | Ctrl-C | 즉시 모터 0 |
 | SEARCH 1스윕 실패 | 무한 회전 금지, `ABORT(not_found)` |

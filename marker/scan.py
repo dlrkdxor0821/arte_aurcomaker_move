@@ -11,17 +11,20 @@ from sensor_msgs.msg import LaserScan
 
 
 class ScanWatch:
-    """.front_m 전방 최소거리(관측 전 None) · .ready 첫 /scan 수신 여부.
+    """.front_m 전방 최소거리(관측 전 None) · .ready 첫 수신 여부 · .age() 마지막 수신 후 경과.
 
     .ready 가 필요한 이유: front_m 은 관측 전엔 None 인데, 상태기계는 front_m=None 을
-    '근접 정보 없음(안전하다고 가정)'으로 취급한다. 그래서 /scan 이 아직 안 들어온
-    상태를 front_m 만으로는 구분할 수 없고, 그 상태에서 움직이면 근접 안전장치가
-    꺼진 채로 첫 몇 사이클을 도는 셈이 된다.
+    '근접 정보 없음'으로 취급한다. 그래서 /scan 이 아직 안 들어온 상태를 front_m 만으로는
+    구분할 수 없고, 그 상태에서 움직이면 근접 안전장치가 꺼진 채로 도는 셈이 된다.
+
+    .age() 가 따로 필요한 이유: ready 는 '한 번 받았다'일 뿐이다. 라이다가 죽으면
+    마지막 값이 영원히 남아, 보호가 켜진 것처럼 보이는 채로 실제로는 꺼진다.
     """
 
     def __init__(self, node, topic: str = "/scan", half_angle_deg: float = 15.0):
         self.front_m = None
         self.ready = False
+        self._last_t = None
         self._half = math.radians(half_angle_deg)
         node.create_subscription(LaserScan, topic, self._on_scan, qos_profile_sensor_data)
 
@@ -46,5 +49,4 @@ class ScanWatch:
                 best = r
         self.front_m = best
         self._last_t = time.monotonic()
-        self.ready = True
         self.ready = True
