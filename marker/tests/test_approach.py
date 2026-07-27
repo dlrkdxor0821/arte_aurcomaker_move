@@ -7,7 +7,7 @@ from marker.types import MarkerObs
 
 
 def obs(z, ex=0.0, yaw=0.0, lat=0.0, marker_id=1):
-    return MarkerObs(marker_id=marker_id, ex=ex, z_m=z, x_m=0.0,
+    return MarkerObs(marker_id=marker_id, ex=ex, z_m=z,
                      yaw_deg=yaw, lateral_m=lat, size_frac=0.1)
 
 

@@ -127,5 +127,5 @@ def detect_marker(frame, K, dist, *, marker_len_m: float, target_id: int,
     lateral = float(cam_in_marker[0])
     if not np.isfinite([tvec[2], yaw, lateral, ex]).all():
         return None
-    return MarkerObs(marker_id=target_id, ex=ex, z_m=float(tvec[2]), x_m=float(tvec[0]),
+    return MarkerObs(marker_id=target_id, ex=ex, z_m=float(tvec[2]),
                      yaw_deg=yaw, lateral_m=lateral, size_frac=side_px / float(w))

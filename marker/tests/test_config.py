@@ -31,7 +31,7 @@ def test_steer_sign_is_normalized_to_plus_or_minus_one():
 
 
 def test_value_types_are_frozen():
-    obs = MarkerObs(marker_id=1, ex=0.0, z_m=1.0, x_m=0.0,
+    obs = MarkerObs(marker_id=1, ex=0.0, z_m=1.0,
                     yaw_deg=0.0, lateral_m=0.0, size_frac=0.1)
     cmd = Cmd(linear=0.0, angular=0.0, phase="SEARCH", done=False, reason="")
     for frozen, field in ((obs, "z_m"), (cmd, "linear")):

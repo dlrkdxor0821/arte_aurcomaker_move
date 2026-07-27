@@ -16,24 +16,21 @@ def _yaw_from_quat(q) -> float:
 
 
 class OdomTracker:
-    """.yaw_deg 누적(언랩, 도, 좌회전 +) · .travel_m 누적 경로 길이(m) ·
-    .forward_m 헤딩에 투영한 **부호 있는 전진 거리**(m) ·
-    .pos_xy 최신 (x, y) · .ready 첫 /odom 수신 여부.
+    """.yaw_deg 누적(언랩, 도, 좌회전 +) · .forward_m 헤딩에 투영한 부호 있는 전진
+    거리(m) · .ready 첫 /odom 수신 여부.
 
-    무시각 구간의 도달 판정에는 .travel_m 도 .pos_xy 거리도 아니라 .forward_m 을 쓴다.
-    누적 경로 길이는 제자리 진동으로도 늘고, 시작점 대비 직선거리는 **옆으로 밀린
-    거리**까지 진행으로 세기 때문이다. 앞으로 간 만큼만 세야 벽 앞 10cm 가 맞는다.
+    거리 판정에 누적 경로 길이나 시작점 대비 직선거리를 쓰지 않는 이유: 전자는 제자리
+    진동으로도 늘고, 후자는 **옆으로 밀린 거리**까지 진행으로 센다. 앞으로 간 만큼만
+    세야 벽 앞 10cm 가 맞는다.
 
     .ready 는 `drive` 모드가 근접 안전장치(scan) 없이 움직이기 시작하는 것을 막는 데
-    쓰인다 — 첫 메시지가 오기 전엔 yaw_deg/travel_m/pos_xy 가 전부 0 인 채로 '정상'
+    쓰인다 — 첫 메시지가 오기 전엔 yaw_deg/forward_m 이 0 인 채로 '정상'
     처럼 보이기 때문에, 값만 보고는 아직 수신 전인지 구분할 수 없다.
     """
 
     def __init__(self, node, topic: str = "/odom"):
         self.yaw_deg = 0.0
-        self.travel_m = 0.0
         self.forward_m = 0.0
-        self.pos_xy = (0.0, 0.0)
         self.ready = False
         self._prev_yaw = None
         self._prev_xy = None
@@ -52,9 +49,7 @@ class OdomTracker:
         self._prev_yaw = yaw
         if self._prev_xy is not None:
             dx, dy = p.x - self._prev_xy[0], p.y - self._prev_xy[1]
-            self.travel_m += math.hypot(dx, dy)
             # 현재 헤딩에 투영 → 옆으로 밀린 성분은 빠지고, 뒤로 간 만큼은 차감된다.
             self.forward_m += dx * math.cos(yaw) + dy * math.sin(yaw)
         self._prev_xy = (p.x, p.y)
-        self.pos_xy = (p.x, p.y)
         self.ready = True
