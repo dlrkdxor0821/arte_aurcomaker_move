@@ -1,0 +1,75 @@
+"""프레임 획득 — 이 파일이 이음매다.
+
+1단계(이 레포, 단독 실행)는 장치를 직접 연다. 다른 스택이 안 떠 있으므로 경합이 없다.
+
+3단계에서 aba_project 미션 BT 로 승격하면 그때는 영상 송출 프로세스가 카메라를 잡고
+있다. 장치를 직접 열면 앞캠이 'Device or resource busy' 로 죽는다. 그때는 아래
+get_frame() 한 곳만 공유메모리 탭 읽기로 바꾸면 되고, 상태기계는 손대지 않는다.
+
+CSI(picam)는 일반 VideoCapture 로 검은 화면만 나오므로 picamera2 를 거친다.
+"""
+import cv2
+
+_ROTATE = {90: cv2.ROTATE_90_CLOCKWISE, 180: cv2.ROTATE_180,
+           270: cv2.ROTATE_90_COUNTERCLOCKWISE}
+
+
+class Camera:
+    """get_frame() 하나만 노출한다. 어디서 오는지는 호출자가 몰라야 한다."""
+
+    def __init__(self, reader, closer, rotate: int = 0):
+        self._read = reader
+        self._close = closer
+        self._rotate = rotate
+
+    def get_frame(self):
+        frame = self._read()
+        if frame is None:
+            return None
+        if self._rotate in _ROTATE:
+            frame = cv2.rotate(frame, _ROTATE[self._rotate])
+        return frame
+
+    def close(self) -> None:
+        self._close()
+
+
+def _open_csi(width: int, height: int) -> Camera:
+    try:
+        from picamera2 import Picamera2
+    except ImportError:
+        raise SystemExit(
+            "picamera2 가 없다. CSI 카메라는 시스템 패키지가 필요하다:\n"
+            "  sudo apt install -y python3-picamera2\n"
+            "그리고 가상환경이 아니라 시스템 python3 로 실행해라.")
+    cam = Picamera2()
+    cam.configure(cam.create_preview_configuration(
+        main={"size": (width, height), "format": "RGB888"}))   # BGR 순서로 나온다
+    cam.start()
+    return Camera(cam.capture_array, cam.stop)
+
+
+def _open_usb(index: int, width: int, height: int) -> Camera:
+    cap = cv2.VideoCapture(index)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+    if not cap.isOpened():
+        raise SystemExit(f"카메라를 열 수 없다: index={index}")
+
+    def read():
+        ok, frame = cap.read()
+        return frame if ok else None
+
+    return Camera(read, cap.release)
+
+
+def open_camera(source: str = "csi", *, width: int = 640, height: int = 480,
+                rotate: int = 180) -> Camera:
+    """source: 'csi' 또는 USB 장치 인덱스 문자열('0', '1', ...).
+
+    rotate 기본 180 은 이 Pi 의 CSI 카메라가 거꾸로 장착돼 있기 때문이며,
+    config/camera/picam_640x480_rot180.npz 가 그 상태로 캘리브된 것이다.
+    """
+    cam = _open_csi(width, height) if source == "csi" else _open_usb(int(source), width, height)
+    cam._rotate = rotate
+    return cam
