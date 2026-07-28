@@ -29,10 +29,13 @@ ENVFILE="config/field.env"
 [ -f /opt/ros/jazzy/setup.bash ] && source /opt/ros/jazzy/setup.bash || true
 
 # ---------------------------------------------------------------- 도우미
-say()  { printf '\n\033[1m%s\033[0m\n' "$*"; }
-info() { printf '      %s\n' "$*"; }
-ok()   { printf '      \033[32mOK\033[0m   %s\n' "$*"; }
-bad()  { printf '      \033[31mFAIL\033[0m %s\n' "$*"; }
+# 사람이 읽는 줄은 전부 stderr 로 낸다. stdout 은 함수의 '반환값' 전용이다.
+# 섞이면 $(...) 로 값을 받을 때 로그 문장까지 값에 딸려 들어간다 —
+# 실제로 LIN_PULSE 에 "…49회 발행 (구독자 1)\n0.05" 가 저장돼서 drive.sh 가 깨졌다.
+say()  { printf '\n\033[1m%s\033[0m\n' "$*" >&2; }
+info() { printf '      %s\n' "$*" >&2; }
+ok()   { printf '      \033[32mOK\033[0m   %s\n' "$*" >&2; }
+bad()  { printf '      \033[31mFAIL\033[0m %s\n' "$*" >&2; }
 pause(){ read -r -p "      엔터로 계속 (Ctrl-C 중단) "; }
 
 save() {   # save KEY VALUE — field.env 에 덮어쓴다
@@ -202,7 +205,7 @@ while time.monotonic() < end and pub.get_subscription_count() == 0:
     rclpy.spin_once(node, timeout_sec=0.05)
 n = pub.get_subscription_count()
 if n == 0:
-    print(f"        [경고] {topic} 구독자가 0 이다 — 명령이 아무 데도 안 간다")
+    print(f"        [경고] {topic} 구독자가 0 이다 — 명령이 아무 데도 안 간다", file=sys.stderr)
 msg = Twist(); msg.linear.x = lin; msg.angular.z = ang
 end = time.monotonic() + secs
 sent = 0
@@ -211,7 +214,7 @@ while time.monotonic() < end:
     rclpy.spin_once(node, timeout_sec=0.05)
 pub.publish(Twist())                                # 정지
 rclpy.spin_once(node, timeout_sec=0.1)
-print(f"        {topic} 로 lin={lin} ang={ang} 를 {sent}회 발행 (구독자 {n})")
+print(f"        {topic} 로 lin={lin} ang={ang} 를 {sent}회 발행 (구독자 {n})", file=sys.stderr)
 node.destroy_node(); rclpy.shutdown()
 PY
 }
