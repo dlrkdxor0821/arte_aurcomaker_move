@@ -22,7 +22,7 @@ _D = MarkerDriveConfig()      # 기본값의 유일한 출처 (drive.py 와 같�
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="마커 검출 관찰(모터 무접촉)")
     ap.add_argument("--source", default="0", help="'csi' 또는 USB 인덱스")
-    ap.add_argument("--slot", default="back", choices=["front", "back"])
+    ap.add_argument("--slot", default="back", choices=["front", "front0", "back"])
     ap.add_argument("--rotate", type=int, default=0, choices=[0, 180],
                     help="90/270 은 캘리브레이션이 같이 안 돌아 지원하지 않는다")
     ap.add_argument("--marker-id", type=int, default=_D.marker_id)
@@ -33,7 +33,7 @@ def main(argv=None) -> int:
     ap.add_argument("--no-window", action="store_true", help="창 없이 텍스트만")
     a = ap.parse_args(argv)
 
-    K, dist = load_calib(a.slot)
+    K, dist = load_calib(a.slot, a.rotate)
     cam = open_camera(a.source, rotate=a.rotate)
     print(f"[ok] source={a.source} slot={a.slot} id={a.marker_id} dict={a.dict_name}")
     try:

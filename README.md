@@ -10,17 +10,36 @@
 ## 빠른 사용
 
 ```bash
-# 0) 벽 마커가 어떤 사전인지 먼저 확정한다 (틀리면 검출 0개로 조용히 실패한다)
-./marker-watch.sh --scan-dicts
+# 로봇에서 딱 한 번 — 현장 값을 하나씩 잡아 config/field.env 에 저장한다
+./pi/setup.sh
 
-# 1) 모터 없이 검출만 — 마커 부착 높이·조명 잡기
-./marker-drive.sh detect
+# 그 뒤로는 이것만 (위에서 잡은 값을 자동으로 읽는다)
+./pi/drive.sh
 
-# 2) 실제 주행
-./marker-drive.sh
+# 비상 정지 — 주행 중엔 두 번째 터미널에 미리 쳐두고 엔터만 남겨라
+./pi/drive.sh stop
+```
 
-# 3) 비상 정지
-./marker-drive.sh stop
+`pi/setup.sh` 는 0~6단계다: 사전 점검(토픽·카메라) → 마커 사전 확정 →
+카메라 장착각 → 앞면 오프셋 → yaw 신뢰 거리 → 조향 극성 → 정상 주행·정지 거리 보정.
+5·6단계에서만 모터가 돈다. 값 하나만 다시 잡으려면 `./pi/setup.sh 4` 처럼 단계 번호를 준다.
+
+로봇 없이 노트북에서 확인할 수 있는 것은 따로 있다:
+
+```bash
+./laptop/check.sh              # 단위 테스트 + ROS 배선 + 폐루프 시뮬 영상
+./laptop/check.sh sim --show   # 시뮬을 창으로 보면서
+```
+
+시뮬은 렌더→검출→상태기계→이동 루프를 실제로 돌린다(②③은 실기 코드 그대로).
+제어법이 수렴하는지·목표 거리에 서는지는 여기서 보이지만, 조향 극성·장착각·실물 사전은
+로봇에서만 정해진다.
+
+수동으로 값을 주고 싶으면 플래그를 그대로 쓴다 — 명령줄이 `field.env` 를 이긴다:
+
+```bash
+./pi/drive.sh detect                            # 모터 무접촉, 검출값만
+./pi/drive.sh --steer-sign -1 --axis-gate 0.5
 ```
 
 ## 실행 전 확인
@@ -95,7 +114,7 @@
 | 플래그 | 기본 | 정하는 법 |
 |---|---|---|
 | `--steer-sign` | `+1` | 로봇이 반대로 흐르면 `-1`. 소프트웨어로 판단 불가 |
-| `--axis-gate` | `0.6` | `marker-watch.sh` 로 yaw 가 안정되는 거리를 보고 |
+| `--axis-gate` | `0.6` | `pi/watch.sh` 로 yaw 가 안정되는 거리를 보고 |
 | `--front-offset` | `0.0` | `detect` 의 "앞면까지 남음" 과 자로 잰 값 비교 |
 | `--dict` | `DICT_5X5_100` | `--scan-dicts` 로 실물 확정 |
 | `--sensor-wait` | `5.0` | 로봇 구동 노드가 느리게 뜨면 늘린다 |
@@ -106,11 +125,40 @@
 | `--pose-kp-lat` | `1.5` | 축 정렬의 교차오차 이득 |
 | `--sensor-timeout` | `0.4` | 센서 끊김 판정(초) |
 
-env 로도 준다: `STEER_SIGN=-1 ./marker-drive.sh`
+env 로도 준다: `STEER_SIGN=-1 ./pi/drive.sh`
 
 `--source` 는 `csi`(기본) · USB 인덱스(`0`) · **영상 파일 경로**를 받는다. 현장에서 찍어 온
 영상을 그대로 흘려 넣어 게이트·극성을 다시 맞출 수 있다(모터는 그대로 나가므로 로봇을
 들어 올려 두거나 `detect` 로 쓴다).
+
+## 어디서 실행하나
+
+스크립트는 실행할 기계별로 폴더가 나뉜다. 헷갈릴 일이 없게.
+
+| 폴더 | 기계 | 무엇 |
+|---|---|---|
+| `pi/` | **로봇** | `setup.sh` 현장 값 잡기 · `drive.sh` 주행 · `watch.sh` 검출 관찰 |
+| `laptop/` | **노트북** | `check.sh` 테스트 + ROS 배선 + 폐루프 시뮬 영상. 하드웨어 무접촉 |
+| `tools/` | (내부) | `ros-smoke.sh` — `laptop/check.sh` 가 부른다 |
+
+`pi/setup.sh` 가 잡은 값은 `config/field.env` 에 저장되고 `pi/drive.sh` 가 자동으로 읽는다.
+우선순위는 **명령줄 > 환경변수 > `field.env` > 코드 기본값**. 이 파일은 로봇마다 다르므로
+git 에 올리지 않는다.
+
+## 캘리브레이션 슬롯
+
+`--slot` 과 `--rotate` 는 짝이다. 어긋나면 `load_calib` 이 막는다 — 조용히 돌면
+거리(`z_m`)는 그럴듯하게 나오고 좌우만 흐르는, 가장 찾기 어려운 증상이 된다.
+
+| 슬롯 | 파일 | 맞는 `--rotate` | cx |
+|---|---|---|---|
+| `front` | `picam_640x480_rot180.npz` | `180` | 278.17 |
+| `front0` | `picam_640x480.npz` | `0` | 360.83 |
+| `back` | `usb_640x480.npz` | `0` | 255.94 |
+
+세 파일 모두 `aba_project/config/camera/` 원본을 바이트 단위로 복사한 것이다.
+`front`/`back` 짝은 `aba_project` 영상 송출(`camera_sender.py`)의 기본 회전값과 일치한다
+(picamera → 180, 뒷캠 → 0). 회전 유무로 cx 가 82.66px 달라진다 — 640px 폭의 13%.
 
 ## 구조
 
@@ -119,20 +167,21 @@ env 로도 준다: `STEER_SIGN=-1 ./marker-drive.sh`
 | `marker/approach.py` | **판단 전부.** 순수 상태기계 — 카메라·모터·시계·ROS 를 모른다 |
 | `marker/detect.py` | 프레임 → 관측값. IPPE_SQUARE 고정, cv2 4.6/4.7+ 양쪽 지원 |
 | `marker/camera.py` | **프레임 획득 이음매.** 다른 스택 위로 올릴 때 여기만 바꾼다 |
-| `marker/calib.py` | 슬롯(front/back) → 캘리브 파일 |
+| `marker/calib.py` | 슬롯 → 캘리브 파일. `--rotate` 와 짝이 맞는지 검사 |
 | `marker/odom.py` `scan.py` | 누적 yaw·경로길이·**전진 성분**·최신 위치, 원본 `/scan` 전방 최소거리, 각각 `.ready` |
 | `marker/drive.py` `watch.py` | CLI 배선(센서 준비 대기 포함) / 관찰 |
 
 ## 테스트
 
 ```bash
-python3 -m pytest marker/tests/ -v      # 66개, 하드웨어 없이
+python3 -m pytest marker/tests/ -q      # 100개, 하드웨어 없이
 ./tools/ros-smoke.sh                    # ROS 배선까지, 하드웨어 없이
 ```
 
 | 무엇 | 어디까지 보나 |
 |---|---|
 | `test_config.py` `test_approach.py` | 상태기계 전이·중단 조건. 가짜 관측값을 넣는다 |
+| `test_calib.py` | 슬롯↔회전 짝, 회전 유무로 cx 가 실제로 달라지는지 |
 | `test_detect.py` | 합성 마커 렌더로 거리·부호. 사시 시점과 자세 해 거부까지 |
 | `test_closed_loop_sim.py` | **렌더 → 검출 → 상태기계 → 이동 → 다시 렌더.** 제어법이 실제로 수렴하는지 |
 | `tools/ros-smoke.sh` | rclpy 노드·토픽 배선·종료코드·종료 시 정지 명령 |

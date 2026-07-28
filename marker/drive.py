@@ -39,7 +39,7 @@ def _parse(argv):
     ap = argparse.ArgumentParser(description="ArUco 마커 주행 (nav2 미사용)")
     ap.add_argument("mode", choices=["drive", "detect", "stop"])
     ap.add_argument("--source", default="csi", help="'csi' 또는 USB 인덱스('0')")
-    ap.add_argument("--slot", default="front", choices=["front", "back"],
+    ap.add_argument("--slot", default="front", choices=["front", "front0", "back"],
                     help="캘리브 선택 키")
     ap.add_argument("--rotate", type=int, default=180, choices=[0, 180],
                     help="90/270 은 캘리브레이션이 같이 안 돌아 지원하지 않는다")
@@ -127,7 +127,7 @@ def main(argv=None) -> int:
         print("[ok] 정지 명령 발행 완료")
         return 0
 
-    K, dist = load_calib(a.slot)
+    K, dist = load_calib(a.slot, a.rotate)
     cam = open_camera(a.source, rotate=a.rotate)
     odom = OdomTracker(node)
     watch = ScanWatch(node, forward_deg=a.scan_forward_deg)

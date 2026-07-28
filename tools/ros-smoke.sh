@@ -47,7 +47,7 @@ PY
 
 echo "[2/4] 센서 없이 drive — 안전 게이트가 막아야 한다"
 set +e
-python3 -m marker.drive drive --source "$VIDEO" --slot front --rotate 0 --sensor-wait 2 \
+python3 -m marker.drive drive --source "$VIDEO" --slot front0 --rotate 0 --sensor-wait 2 \
     > "$WORK/gate.log" 2>&1
 GATE_RC=$?
 set -e
@@ -99,7 +99,7 @@ PY
 SINK=$!
 sleep 1
 set +e
-timeout 60 python3 -m marker.drive drive --source "$VIDEO" --slot front --rotate 0 \
+timeout 60 python3 -m marker.drive drive --source "$VIDEO" --slot front0 --rotate 0 \
     --sensor-wait 5 --loop-hz 12 > "$WORK/drive.log" 2>&1
 DRIVE_RC=$?
 set -e
