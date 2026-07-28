@@ -55,6 +55,7 @@ ARGS=("$MODE")
 [ -n "${STEER_ANG_MAX:-}" ]    && ARGS+=(--steer-ang-max "$STEER_ANG_MAX")
 [ -n "${SCAN_FORWARD_DEG:-}" ] && ARGS+=(--scan-forward-deg "$SCAN_FORWARD_DEG")
 [ -n "${SENSOR_WAIT:-}" ]      && ARGS+=(--sensor-wait "$SENSOR_WAIT")
+[ -n "${CMD_TOPIC:-}" ]        && ARGS+=(--cmd-topic "$CMD_TOPIC")
 ARGS+=("$@")     # 명령줄 플래그가 맨 뒤 — argparse 는 뒤에 온 것이 이긴다
 
 cd "$HERE"

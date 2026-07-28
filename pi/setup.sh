@@ -19,6 +19,11 @@ set -eo pipefail
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENVFILE="config/field.env"
 
+# ROS 는 여기서 한 번만 소싱한다. 0단계 안에서 하면 `./pi/setup.sh 3` 처럼
+# 건너뛰고 들어올 때 ros2 명령이 없는 채로 돈다.
+# shellcheck disable=SC1091
+[ -f /opt/ros/jazzy/setup.bash ] && source /opt/ros/jazzy/setup.bash || true
+
 # ---------------------------------------------------------------- 도우미
 say()  { printf '\n\033[1m%s\033[0m\n' "$*"; }
 info() { printf '      %s\n' "$*"; }
@@ -49,9 +54,7 @@ median_of() { grep -oE "$1=[-+]?[0-9.]+" | cut -d= -f2 | sort -g | awk '{a[NR]=$
 step0() {
   say "[0/6] 사전 점검 — 로봇이 준비됐는지"
   local fail=0
-  [ -f /opt/ros/jazzy/setup.bash ] && ok "ROS2 jazzy" || { bad "ROS2 jazzy 없음"; fail=1; }
-  # shellcheck disable=SC1091
-  [ -f /opt/ros/jazzy/setup.bash ] && source /opt/ros/jazzy/setup.bash
+  [ -f /opt/ros/jazzy/setup.bash ] && ok "ROS2 jazzy (소싱됨)" || { bad "ROS2 jazzy 없음"; fail=1; }
   python3 -c "import rclpy" 2>/dev/null && ok "rclpy" || { bad "rclpy 안 잡힘"; fail=1; }
   python3 -c "import cv2" 2>/dev/null && ok "opencv" || { bad "opencv 없음"; fail=1; }
   python3 -c "import picamera2" 2>/dev/null && ok "picamera2 (CSI 카메라)" \
@@ -61,9 +64,27 @@ step0() {
   for t in /odom /scan; do
     grep -qx "$t" <<<"$topics" && ok "$t 발행 중" || { bad "$t 없음 — 구동 노드 확인"; fail=1; }
   done
-  local subs; subs="$(timeout 5 ros2 topic info /cmd_vel 2>/dev/null | grep -oE 'Subscription count: [0-9]+' | grep -oE '[0-9]+$' || echo 0)"
-  [ "${subs:-0}" -gt 0 ] && ok "/cmd_vel 구독자 ${subs}개" \
-    || { bad "/cmd_vel 구독자 0 — 구동 노드가 없다. 명령을 내도 안 움직인다"; fail=1; }
+  # 명령 토픽 이름은 로봇마다 다르다. field.env 에 CMD_TOPIC 이 있으면 그걸 본다.
+  local topic; topic="$(grep -oE '^CMD_TOPIC=.*' "$ENVFILE" 2>/dev/null | cut -d= -f2)"
+  topic="${topic:-/cmd_vel}"
+  local subs; subs="$(timeout 5 ros2 topic info "$topic" 2>/dev/null | grep -oE 'Subscription count: [0-9]+' | grep -oE '[0-9]+$' || echo 0)"
+  if [ "${subs:-0}" -gt 0 ]; then
+    ok "$topic 구독자 ${subs}개"
+  else
+    bad "$topic 구독자 0 — 명령을 내도 안 움직인다"
+    fail=1
+    # 구동 노드는 대개 /odom 을 발행한다. 그 노드가 뭘 구독하는지 보면 진짜 이름이 나온다.
+    local drv; drv="$(timeout 5 ros2 topic info -v /odom 2>/dev/null \
+      | awk '/Publishers:/{p=1} p&&/Node name:/{print $3; exit}')"
+    if [ -n "$drv" ]; then
+      info "구동 노드로 보이는 것: $drv — 이 노드가 구독하는 토픽:"
+      timeout 5 ros2 node info "/$drv" 2>/dev/null \
+        | awk '/Subscribers:/{p=1;next} /Publishers:|Service|Action/{p=0} p&&NF' | sed 's/^/        /'
+    fi
+    info "cmd 붙은 토픽 전부:"
+    timeout 5 ros2 topic list 2>/dev/null | grep -i cmd | sed 's/^/        /' || true
+    info "이름이 다르면: ./pi/setup.sh topic /진짜/이름"
+  fi
 
   echo
   if [ "$fail" -ne 0 ]; then
@@ -169,6 +190,10 @@ step6() {
 
 # ---------------------------------------------------------------- 진입점
 if [ "${1:-}" = "reset" ]; then rm -f "$ENVFILE"; info "$ENVFILE 삭제"; exit 0; fi
+if [ "${1:-}" = "topic" ]; then
+  [ -n "${2:-}" ] || { echo "사용법: ./pi/setup.sh topic /진짜/토픽이름" >&2; exit 1; }
+  save CMD_TOPIC "$2"; info "다시 점검: ./pi/setup.sh 0"; exit 0
+fi
 FROM="${1:-0}"
 for n in 0 1 2 3 4 5 6; do
   [ "$n" -ge "$FROM" ] && "step$n"
