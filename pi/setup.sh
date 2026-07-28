@@ -15,7 +15,11 @@
 #
 # ⚠️ 5·6단계는 모터가 실제로 돈다. 시작 전 두 번째 터미널에 아래를 쳐두고 엔터만 남겨라:
 #      ./pi/drive.sh stop
-set -eo pipefail
+# set -e 는 안 쓴다. 이 스크립트는 "값이 없다/못 찾았다"를 정상 흐름으로 다루는데,
+# grep 이 아무것도 못 찾아도 exit 1 이라 set -e 면 그 자리에서 조용히 죽는다
+# (실제로 field.env 가 없을 때 0단계가 아무 말 없이 끝났다). 각 단계가 스스로
+# 결과를 확인하고 fail=1 / exit 로 처리한다.
+set -o pipefail
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENVFILE="config/field.env"
 
@@ -65,7 +69,7 @@ step0() {
     grep -qx "$t" <<<"$topics" && ok "$t 발행 중" || { bad "$t 없음 — 구동 노드 확인"; fail=1; }
   done
   # 명령 토픽 이름은 로봇마다 다르다. field.env 에 CMD_TOPIC 이 있으면 그걸 본다.
-  local topic; topic="$(grep -oE '^CMD_TOPIC=.*' "$ENVFILE" 2>/dev/null | cut -d= -f2)"
+  local topic; topic="$(grep -oE '^CMD_TOPIC=.*' "$ENVFILE" 2>/dev/null | cut -d= -f2 || true)"
   topic="${topic:-/cmd_vel}"
   local subs; subs="$(timeout 5 ros2 topic info "$topic" 2>/dev/null | grep -oE 'Subscription count: [0-9]+' | grep -oE '[0-9]+$' || echo 0)"
   if [ "${subs:-0}" -gt 0 ]; then
