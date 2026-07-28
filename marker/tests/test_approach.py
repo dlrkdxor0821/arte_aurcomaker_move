@@ -475,3 +475,26 @@ def test_frozen_odom_is_still_a_stall():
     cfg = MarkerDriveConfig(ang_search=0.16, search_step_timeout_s=3.0)
     cmd, _ = _sweep_until_done(cfg, yaw_follows_command=False)
     assert cmd.reason == "turn_stall"
+
+
+def test_zero_pause_makes_axis_align_continuous():
+    """pi/drive-smooth.sh 가 코드 수정 없이 연속 주행이 되는 근거.
+
+    기본값(정지 0.9초)은 전체 틱의 17% 만 전진 명령이 나간다. 멈춘 순간의
+    흐리지 않은 프레임으로만 마커 자세를 풀기 위한 것이다. 정지를 0 으로 두면
+    끊김 없이 전진해야 한다 — 그러지 않으면 스크립트가 아무것도 안 바꾸는 셈이다.
+    """
+    def duty(pause):
+        cfg = MarkerDriveConfig(move_pause_s=pause, axis_gate_m=0.6, lin_pulse=0.05)
+        m = MarkerApproach(cfg)
+        m.phase = "AXIS_ALIGN"
+        moving = 0
+        for i in range(60):
+            t = i / cfg.loop_hz
+            cmd = m.step(obs(z=0.45, lat=0.03), yaw_deg=0.0, forward_m=0.05 * t,
+                         front_m=None, now_s=t)
+            moving += cmd.linear > 0
+        return moving / 60
+
+    assert duty(0.0) == 1.0, "정지 0 인데도 끊긴다"
+    assert duty(0.9) < 0.25, "기본값이 원래 띄엄띄엄이 아니면 이 테스트가 무의미하다"
