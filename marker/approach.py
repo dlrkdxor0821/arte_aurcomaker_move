@@ -55,6 +55,8 @@ class MarkerApproach:
         self._settle_until = 0.0     # 회전 후 재검출 대기 종료 시각
         self._step_started = None    # 현재 스텝 회전 시작 시각(회전 실패 감시)
         self._step_err0 = None       # 스텝 시작 시점의 각도 오차 부호(교차 판정용)
+        self._turn_ref = None        # 회전 진행 감시 기준 방위각
+        self._turn_since = 0.0       # 그 기준이 갱신된 시각
         # --- 조향 ---
         self._ex_f = None            # ex 저역통과 상태
         self._i_acc = 0.0            # 조향 적분 누적
@@ -159,6 +161,8 @@ class MarkerApproach:
         if self._step_started is None:
             self._step_started = now_s
             self._step_err0 = err
+            self._turn_ref = yaw_deg
+            self._turn_since = now_s
         # 허용오차 창(±tol)만 보면 루프가 느릴 때 창을 건너뛴다.
         # 12Hz·0.35rad/s 면 1.7°/tick 이라 안전하지만, 검출이 무거워 5Hz 로 떨어지면
         # 4°/tick 이라 ±2° 창을 그냥 지나쳐 영영 도달 판정이 안 난다.
@@ -169,10 +173,17 @@ class MarkerApproach:
             self._settle_until = now_s + c.turn_pause_s
             self._step_started = None
             self._step_err0 = None
+            self._turn_ref = None
             return Cmd(0.0, 0.0, "SEARCH", False, "look")
-        if now_s - self._step_started > c.search_step_timeout_s:
-            # 회전 명령을 냈는데 각도가 안 변한다 = 바퀴 헛돎이거나 odom 정지.
-            # 전역 타임아웃까지 헛돌게 두면 원인이 'timeout' 으로 오분류된다.
+        # 회전 명령을 냈는데 각도가 **안 변하는지** 를 본다. 경과 시간만 재면 안 된다 —
+        # 한 스텝에 걸리는 시간은 ang_search 에 반비례하므로, 느린 로봇(불감대가 높아
+        # ang_search 를 낮춘 경우)은 정상 회전 중에도 시간 초과로 걸린다.
+        # 실측: ang_search 0.16rad/s 로 20° 회전은 2.2초, 40° 구간은 4.4초라 3초 한도를 넘는다.
+        if abs(yaw_deg - self._turn_ref) > c.search_tol_deg:
+            self._turn_ref = yaw_deg
+            self._turn_since = now_s
+        elif now_s - self._turn_since > c.search_step_timeout_s:
+            # 바퀴 헛돎이거나 odom 정지. 전역 타임아웃까지 두면 'timeout' 으로 오분류된다.
             return self._stop("turn_stall", "ABORT")
         return Cmd(0.0, c.ang_search if err > 0 else -c.ang_search,
                    "SEARCH", False, "sweep")

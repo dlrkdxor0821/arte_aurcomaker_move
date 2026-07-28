@@ -1,4 +1,6 @@
 """상태기계 테스트 — 하드웨어 없이 전 단계 전이와 중단 조건을 검증한다."""
+import math
+
 import pytest
 
 from marker.approach import MarkerApproach
@@ -437,3 +439,39 @@ def test_final_align_failure_is_not_reported_as_success():
         if c.done:
             break
     assert c.phase == "ABORT" and c.reason == "final_align_failed"
+
+
+# ------------------------------------------------- 느린 회전 (실기에서 나온 문제)
+
+def _sweep_until_done(cfg, *, yaw_follows_command: bool, max_ticks=4000):
+    """탐색만 돌린다(마커 없음). yaw 가 명령을 따라가는지 여부만 바꾼다."""
+    m = MarkerApproach(cfg)
+    yaw, t, dt = 0.0, 0.0, 1.0 / cfg.loop_hz
+    for _ in range(max_ticks):
+        cmd = m.step(None, yaw_deg=yaw, forward_m=0.0, front_m=None, now_s=t)
+        if cmd.done:
+            return cmd, t
+        if yaw_follows_command:
+            yaw += math.degrees(cmd.angular) * dt      # 명령대로 실제로 돈다
+        t += dt
+    raise AssertionError("끝나지 않았다")
+
+
+def test_slow_but_real_rotation_is_not_called_a_stall():
+    """불감대가 높아 ang_search 를 낮춘 로봇은 한 스텝에 3초 넘게 걸린다.
+
+    실기 증상: ang_search 0.16rad/s 로 60° 구간을 도는 데 6.5초가 걸려
+    search_step_timeout_s(3초)를 넘고, 정상 회전인데 turn_stall 로 중단됐다.
+    시간이 아니라 '각도가 변하고 있는가'로 판정해야 한다.
+    """
+    cfg = MarkerDriveConfig(ang_search=0.16, search_step_timeout_s=3.0)
+    cmd, elapsed = _sweep_until_done(cfg, yaw_follows_command=True)
+    assert cmd.reason == "not_found", f"{cmd.reason} (경과 {elapsed:.1f}초)"
+    assert elapsed > 3.0, "이 시나리오가 3초를 안 넘으면 회귀를 못 잡는다"
+
+
+def test_frozen_odom_is_still_a_stall():
+    """회전 명령을 내는데 yaw 가 전혀 안 변하면 여전히 turn_stall 이어야 한다."""
+    cfg = MarkerDriveConfig(ang_search=0.16, search_step_timeout_s=3.0)
+    cmd, _ = _sweep_until_done(cfg, yaw_follows_command=False)
+    assert cmd.reason == "turn_stall"
