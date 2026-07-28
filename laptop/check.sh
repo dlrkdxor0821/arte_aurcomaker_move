@@ -16,7 +16,18 @@
 set -eo pipefail
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="out"; mkdir -p "$OUT"
-printf '\033[36m[노트북 전용]\033[0m 하드웨어를 건드리지 않는다. 실기 값은 로봇에서 ./robot-test.sh\n'
+printf '\033[36m[노트북 전용]\033[0m 하드웨어를 건드리지 않는다. 실기 값은 로봇에서 ./pi/setup.sh\n'
+
+# 로봇에서 돌리면 안 된다. 이 스크립트는 가짜 /odom·/scan 을 뿌리고 /cmd_vel 을 발행한다
+# (tools/ros-smoke.sh). 도메인을 77 로 격리하지만, 로봇이 마침 그 도메인이면 실제로 움직인다.
+if [ "${1:-}" != "--force" ] && python3 -c "import picamera2" 2>/dev/null; then
+  echo "[중단] picamera2 가 있다 = 여기는 로봇이다." >&2
+  echo "       이 스크립트는 가짜 센서와 /cmd_vel 을 발행한다. 로봇에서 돌리지 마라." >&2
+  echo "       로봇에서 할 것: ./pi/setup.sh" >&2
+  echo "       그래도 돌리려면: ./laptop/check.sh --force  (모터 배선 분리 후)" >&2
+  exit 1
+fi
+[ "${1:-}" = "--force" ] && shift
 
 MODE="${1:-all}"
 case "$MODE" in all|sim) shift || true ;; -*) MODE="all" ;;

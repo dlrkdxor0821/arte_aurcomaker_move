@@ -38,6 +38,9 @@ if [ -f "$HERE/config/field.env" ]; then
     case "$k" in ''|\#*) continue ;; esac
     eval ": \${$k:=\$v}"
   done < "$HERE/config/field.env"
+  # 도메인은 환경변수라야 rclpy 가 본다. 이게 틀리면 토픽이 안 보여서
+  # '구동 노드가 없다'로 오진한다 — 실제로 그렇게 한 번 헤맸다.
+  [ -n "${ROS_DOMAIN_ID:-}" ] && export ROS_DOMAIN_ID
 fi
 
 ARGS=("$MODE")
@@ -56,6 +59,9 @@ ARGS=("$MODE")
 [ -n "${SCAN_FORWARD_DEG:-}" ] && ARGS+=(--scan-forward-deg "$SCAN_FORWARD_DEG")
 [ -n "${SENSOR_WAIT:-}" ]      && ARGS+=(--sensor-wait "$SENSOR_WAIT")
 [ -n "${CMD_TOPIC:-}" ]        && ARGS+=(--cmd-topic "$CMD_TOPIC")
+[ -n "${LIN_PULSE:-}" ]        && ARGS+=(--lin-pulse "$LIN_PULSE")
+[ -n "${LIN_HOMING:-}" ]       && ARGS+=(--lin-homing "$LIN_HOMING")
+[ -n "${ANG_SEARCH:-}" ]       && ARGS+=(--ang-search "$ANG_SEARCH")
 ARGS+=("$@")     # 명령줄 플래그가 맨 뒤 — argparse 는 뒤에 온 것이 이긴다
 
 cd "$HERE"
