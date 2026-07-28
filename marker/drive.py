@@ -61,6 +61,11 @@ def _parse(argv):
     ap.add_argument("--lin-homing", type=float, default=_D.lin_homing)
     ap.add_argument("--lin-pulse", type=float, default=_D.lin_pulse)
     ap.add_argument("--ang-search", type=float, default=_D.ang_search)
+    ap.add_argument("--move-pulse-s", dest="move_pulse_s", type=float, default=_D.move_pulse_s,
+                    help="한 펄스의 전진 시간(초). 펄스가 옮기는 거리 = 이 값 x lin_pulse 라서, "
+                         "느린 로봇에서 이걸 그대로 두면 한 펄스가 몇 mm 밖에 못 간다")
+    ap.add_argument("--move-pause-s", dest="move_pause_s", type=float, default=_D.move_pause_s,
+                    help="펄스 사이 정지 시간(초). 모션블러를 피해 다시 검출하는 구간")
     ap.add_argument("--steer-ang-max", dest="steer_ang_max", type=float,
                     default=_D.steer_ang_max,
                     help="조향 각속도 상한(rad/s). 축 이탈을 못 지우고 도착하면 올린다")
@@ -90,6 +95,7 @@ def _config(a) -> MarkerDriveConfig:
         pose_yaw_tol_deg=a.pose_yaw_tol, scan_guard_m=a.scan_guard,
         lin_homing=a.lin_homing, lin_pulse=a.lin_pulse,
         ang_search=a.ang_search, steer_ang_max=a.steer_ang_max,
+        move_pulse_s=a.move_pulse_s, move_pause_s=a.move_pause_s,
         pose_kp_lat=a.pose_kp_lat, sensor_timeout_s=a.sensor_timeout,
         search_step_deg=a.search_step_deg,
         search_span_deg=a.search_span_deg, timeout_s=a.timeout, loop_hz=a.loop_hz,

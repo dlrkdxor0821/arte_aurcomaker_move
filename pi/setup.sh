@@ -177,8 +177,9 @@ step3() {
 step4() {
   say "[4/7] yaw 신뢰 거리 (--axis-gate)"
   info "평면 마커는 먼 거리에서 자세 해가 둘이라 yaw 가 뒤집힌다."
-  info "지금부터 20초간 검출값이 흐른다. 로봇을 **천천히 뒤로 물리면서**"
+  info "지금부터 20초간 검출값이 흐른다. 로봇(또는 마커)을 **천천히 멀어지게** 하면서"
   info "yaw 가 흔들리기/뒤집히기 시작하는 거리(z)를 눈으로 잡아라."
+  info "공간이 좁아 멀리 못 가면 그냥 엔터 — 기본값 0.6 이 7cm 마커에 맞는 값이다."
   pause
   detect_run 20 | grep '^marker:' | sed 's/^/      /'
   echo
@@ -245,7 +246,8 @@ step5() {
   say "[5/7] 모터 최소 명령값 — ⚠️ 여기서부터 모터가 돈다"
   info "기본값(전진 0.05m/s, 회전 0.08rad/s)은 옛 코드의 바퀴 퍼센트 단위에서 옮겨온 값이라"
   info "실제 m/s 로는 모터 불감대 아래일 수 있다. 실제로 도는 최소값을 찾는다."
-  info "로봇을 들어 올리거나 앞뒤 1m 를 비워라. 바퀴만 봐도 된다."
+  info "**로봇을 들어 올려 바퀴를 띄우는 것이 가장 안전하다** — 공간이 필요 없다."
+  info "바닥에 둘 거면 앞뒤를 비워라. 바퀴가 도는지만 보면 된다."
   read -r -p "      준비됐으면 yes 입력: " c
   [ "$c" = "yes" ] || { info "중단. 준비되면: ./pi/setup.sh 5"; exit 0; }
 
@@ -262,13 +264,33 @@ step5() {
     bad "회전이 안 된다 — 배선 확인"; exit 1; }
   save STEER_ANG_MAX "$ang"
   save ANG_SEARCH "$(awk -v v="$ang" 'BEGIN{printf "%.3f", v*2}')"
-  info "탐색·정렬 속도를 이 값에 맞췄다."
+
+  # 펄스 길이와 전체 제한시간을 이 로봇 속도에 맞춘다.
+  #
+  # 펄스가 옮기는 거리 = move_pulse_s x lin_pulse 다. 시간이 고정돼 있으면 느린 로봇은
+  # 한 펄스에 몇 mm 밖에 못 가고, 펄스 사이 정지(0.9초)까지 더해져 실효 속도가 폭락한다.
+  # 실측: lin_pulse 0.05 면 펄스당 8.3mm, 실효 7.8mm/s → 50cm 구간에 64초.
+  # 기본 제한시간 60초라 도착 직전에 timeout 으로 중단된다.
+  # 그래서 시간이 아니라 **거리(2cm)** 를 기준으로 펄스 길이를 정한다.
+  local pulse timeout eff
+  pulse="$(awk -v v="$lin" 'BEGIN{p=0.02/v; if(p<0.167)p=0.167; if(p>1.0)p=1.0; printf "%.3f", p}')"
+  save MOVE_PULSE_S "$pulse"
+  eff="$(awk -v v="$lin" -v p="$pulse" 'BEGIN{printf "%.5f", v*p/(p+0.9)}')"
+  # 0.6m(게이트~정지) 를 실효 속도로 가는 시간의 3배 + 여유 40초. 넉넉해도 손해는
+  # 없다 — 진짜 막히면 blocked/align_stall 이 먼저 잡는다. timeout 은 마지막 그물이다.
+  timeout="$(awk -v e="$eff" 'BEGIN{t=0.6/e*3+40; if(t<120)t=120; if(t>600)t=600; printf "%.0f", t}')"
+  save TIMEOUT "$timeout"
+  info "실효 전진 속도 $(awk -v e="$eff" 'BEGIN{printf "%.0f", e*1000}')mm/s → 펄스 ${pulse}초, 제한시간 ${timeout}초"
 }
 
 step6() {
   say "[6/7] 조향 극성 (--steer-sign) — ⚠️ 모터가 돈다"
-  info "마커를 로봇 기준 **오른쪽 20cm** 치우치게, 거리 1m 에 둬라."
-  info "로봇 앞 2m 를 비워라. 두 번째 터미널에 './pi/drive.sh stop' 준비."
+  info "마커를 로봇 기준 **한쪽으로** 치우치게 둬라 — 왼쪽·오른쪽 아무 쪽이나."
+  info "10cm 면 충분하다(많을수록 뚜렷). 판정은 '어느 쪽인가'가 아니라"
+  info "'마커 쪽으로 트는가 반대로 트는가'라서 어느 쪽에 두든 같다."
+  info "거리는 0.6~1.2m 아무 데나. 좁으면 짧게 해도 극성은 보인다."
+  info "로봇 앞을 비워라. 두 번째 터미널에 './pi/drive.sh stop' 준비."
+  info "볼 것은 '도착했나'가 아니라 **처음 몇 초에 어느 쪽으로 트는가** 하나뿐이다."
   read -r -p "      준비됐으면 yes 입력: " c
   [ "$c" = "yes" ] || { info "중단. 준비되면: ./pi/setup.sh 6"; exit 0; }
   ./pi/drive.sh; local rc=$?
@@ -277,6 +299,7 @@ step6() {
     bad "주행이 시작도 못 했다(종료코드 $rc). 극성 판단은 의미가 없다 — 먼저 해결해라."
     exit 1
   fi
+  # 종료코드 1(ABORT)은 여기서 정상이다. 좁은 공간이라 도착 못 해도 조향 방향은 봤다.
   local d
   read -r -p "      로봇이 마커 '쪽으로' 틀었나? (y/n): " d
   if [ "$d" = "n" ]; then
@@ -289,7 +312,8 @@ step6() {
 
 step7() {
   say "[7/7] 정상 주행 + 정지 거리 보정 (--stop-m)"
-  info "마커를 정면 1m, 치우침 없이 둬라. 앞 2m 비우고."
+  info "마커를 정면에, 치우침 없이 둬라. 거리는 **낼 수 있는 최대**(0.8m 면 충분)."
+  info "로봇 앞을 비워라. 두 번째 터미널에 './pi/drive.sh stop' 준비."
   read -r -p "      준비됐으면 yes 입력: " c
   [ "$c" = "yes" ] || { info "중단. 준비되면: ./pi/setup.sh 7"; exit 0; }
   ./pi/drive.sh; local rc=$?

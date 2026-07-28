@@ -67,6 +67,11 @@ ARGS=("$MODE")
 [ -n "${LIN_PULSE:-}" ]        && ARGS+=(--lin-pulse "$LIN_PULSE")
 [ -n "${LIN_HOMING:-}" ]       && ARGS+=(--lin-homing "$LIN_HOMING")
 [ -n "${ANG_SEARCH:-}" ]       && ARGS+=(--ang-search "$ANG_SEARCH")
+[ -n "${MOVE_PULSE_S:-}" ]     && ARGS+=(--move-pulse-s "$MOVE_PULSE_S")
+[ -n "${MOVE_PAUSE_S:-}" ]     && ARGS+=(--move-pause-s "$MOVE_PAUSE_S")
+[ -n "${TIMEOUT:-}" ]          && ARGS+=(--timeout "$TIMEOUT")
+[ -n "${SCAN_GUARD:-}" ]       && ARGS+=(--scan-guard "$SCAN_GUARD")
+[ -n "${POSE_YAW_TOL:-}" ]     && ARGS+=(--pose-yaw-tol "$POSE_YAW_TOL")
 ARGS+=("$@")     # 명령줄 플래그가 맨 뒤 — argparse 는 뒤에 온 것이 이긴다
 
 cd "$HERE"

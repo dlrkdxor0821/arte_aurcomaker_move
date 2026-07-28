@@ -58,3 +58,29 @@ def test_non_finite_values_fall_back_to_defaults():
     assert c.sensor_timeout_s == d.sensor_timeout_s
     assert c.stop_m == d.stop_m
     assert c.steer_kp == d.steer_kp
+
+
+def test_pulse_distance_not_duration_is_what_matters():
+    """펄스 길이를 시간으로 고정하면 느린 로봇이 기어간다.
+
+    실기(pinky)에서 모터 불감대 때문에 lin_pulse 를 0.05m/s 로 낮췄더니
+    한 펄스가 8.3mm, 정지 0.9초를 더한 실효 속도가 7.8mm/s 가 됐다.
+    게이트~정지 구간 0.5m 에 64초 — 기본 제한시간 60초를 넘겨
+    도착 직전에 timeout 으로 중단됐다.
+
+    pi/setup.sh 가 펄스 길이를 '거리 2cm' 기준으로 계산해 넣는 이유가 이것이다.
+    """
+    def effective(lin, pulse):
+        c = MarkerDriveConfig(lin_pulse=lin, move_pulse_s=pulse).clamped()
+        return c.lin_pulse * c.move_pulse_s / (c.move_pulse_s + c.move_pause_s)
+
+    slow_fixed = effective(0.05, 0.10)            # 시간 고정 — 옛 방식
+    slow_scaled = effective(0.05, 0.02 / 0.05)    # 거리 기준 — setup.sh 방식
+    assert 0.5 / slow_fixed > 60, "이 시나리오가 60초를 안 넘으면 회귀를 못 잡는다"
+    assert 0.5 / slow_scaled < 45, f"거리 기준으로도 느리다: {0.5/slow_scaled:.0f}초"
+
+
+def test_pulse_shorter_than_two_ticks_is_raised():
+    """/cmd_vel 은 다음 명령까지 유지된다. 한 틱보다 짧은 펄스는 설정대로 안 움직인다."""
+    c = MarkerDriveConfig(move_pulse_s=0.01, loop_hz=12.0).clamped()
+    assert c.move_pulse_s >= 2.0 / 12.0
