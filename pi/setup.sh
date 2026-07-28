@@ -78,6 +78,19 @@ step0() {
   local subs; subs="$(timeout 5 ros2 topic info "$topic" 2>/dev/null | grep -oE 'Subscription count: [0-9]+' | grep -oE '[0-9]+$' || echo 0)"
   if [ "${subs:-0}" -gt 0 ]; then
     ok "$topic 구독자 ${subs}개"
+    # 우리 말고 다른 발행자가 있으면 명령이 덮인다. 대개 정지(0,0)를 주기적으로 쏘는
+    # 브리지라서, 우리 명령이 나가자마자 0 으로 지워지고 로봇은 안 움직인다.
+    # 에러가 안 나고 그냥 가만히 있어서 배선 문제로 오진하기 쉽다.
+    local pubs; pubs="$(timeout 5 ros2 topic info -v "$topic" 2>/dev/null \
+      | awk '/Node name:/{n=$3} /Endpoint type: PUBLISHER/{print n}' \
+      | grep -v '^marker_drive$' | paste -sd, - || true)"
+    if [ -n "$pubs" ]; then
+      bad "$topic 에 다른 발행자가 있다: $pubs"
+      info "이게 정지 명령을 계속 쏘면 우리 명령이 덮여서 로봇이 안 움직인다."
+      info "확인: ros2 topic echo $topic   (가만히 둬도 값이 흐르면 그놈이다)"
+      info "끄기: pgrep -af 'uvicorn|fastapi|aba_fms' 로 PID 찾아 kill"
+      fail=1
+    fi
   else
     bad "$topic 구독자 0 — 명령을 내도 안 움직인다"
     fail=1
@@ -175,10 +188,40 @@ cmd_topic() {   # 저장된 명령 토픽(없으면 /cmd_vel)
 }
 
 nudge() {       # nudge LIN ANG SECS — 상태기계를 빼고 직접 명령을 쏜다
+  # `ros2 topic pub` 을 timeout 으로 자르면 DDS 탐색(1초 가까이)이 끝나기 전에 죽어서
+  # 구독자에게 한 건도 안 갈 수 있다. 노드를 직접 띄우고 구독자를 기다린 뒤 쏜다.
+  python3 - "$(cmd_topic)" "$1" "$2" "$3" <<'PY'
+import sys, time, rclpy
+from geometry_msgs.msg import Twist
+topic, lin, ang, secs = sys.argv[1], float(sys.argv[2]), float(sys.argv[3]), float(sys.argv[4])
+rclpy.init()
+node = rclpy.create_node("marker_setup_nudge")
+pub = node.create_publisher(Twist, topic, 10)
+end = time.monotonic() + 2.0                       # 구독자가 붙을 때까지 기다린다
+while time.monotonic() < end and pub.get_subscription_count() == 0:
+    rclpy.spin_once(node, timeout_sec=0.05)
+n = pub.get_subscription_count()
+if n == 0:
+    print(f"        [경고] {topic} 구독자가 0 이다 — 명령이 아무 데도 안 간다")
+msg = Twist(); msg.linear.x = lin; msg.angular.z = ang
+end = time.monotonic() + secs
+sent = 0
+while time.monotonic() < end:
+    pub.publish(msg); sent += 1
+    rclpy.spin_once(node, timeout_sec=0.05)
+pub.publish(Twist())                                # 정지
+rclpy.spin_once(node, timeout_sec=0.1)
+print(f"        {topic} 로 lin={lin} ang={ang} 를 {sent}회 발행 (구독자 {n})")
+node.destroy_node(); rclpy.shutdown()
+PY
+}
+
+# 명령 토픽의 실체를 보여준다 — 타입·구독자. 안 움직일 때 이게 답을 준다.
+show_cmd_topic() {
   local t; t="$(cmd_topic)"
-  timeout "$3" ros2 topic pub -r 10 "$t" geometry_msgs/msg/Twist \
-    "{linear: {x: $1}, angular: {z: $2}}" >/dev/null 2>&1 || true
-  ros2 topic pub -1 "$t" geometry_msgs/msg/Twist "{}" >/dev/null 2>&1 || true
+  info "$t 상태:"
+  timeout 5 ros2 topic info -v "$t" 2>&1 \
+    | grep -E 'Type:|Node name:|Endpoint type:|count:' | sed 's/^/        /'
 }
 
 # 값을 키워 가며 "움직였나"를 물어, 처음 움직인 값을 돌려준다.
@@ -186,8 +229,8 @@ find_threshold() {   # find_threshold "설명" KIND 값...
   local label="$1" kind="$2"; shift 2
   local v a
   for v in "$@"; do
-    info "$label $v — 1.5초 명령을 쏜다"
-    if [ "$kind" = lin ]; then nudge "$v" 0 1.5; else nudge 0 "$v" 1.5; fi
+    info "$label $v — 2.5초 명령을 쏜다"
+    if [ "$kind" = lin ]; then nudge "$v" 0 2.5; else nudge 0 "$v" 2.5; fi
     read -r -p "      움직였나? (y/n/q=중단): " a
     [ "$a" = q ] && return 1
     [ "$a" = y ] && { echo "$v"; return 0; }
