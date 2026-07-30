@@ -19,6 +19,7 @@ import argparse
 import sys
 import time
 
+import cv2
 import rclpy
 from geometry_msgs.msg import Twist
 
@@ -132,6 +133,16 @@ def main(argv=None) -> int:
         rclpy.shutdown()
         print("[ok] 정지 명령 발행 완료")
         return 0
+
+    # 검출을 한 코어에서만 돌린다. OpenCV 는 기본으로 코어 여럿에 펼치는데 640x480 은
+    # 쪼개 먹기엔 작아서 병렬 효율이 70% 뿐이다 — CPU 를 1.95배 써서 얻는 속도 향상이
+    # 1.36배고, 나머지는 스레드 조율로 사라진다.
+    # 실측(Pi 4코어, 12Hz): 기본 = 4코어의 17~18%, 1스레드 = 9.9%. 검출 결과는 비트
+    # 단위로 같다(z/yaw/lateral 오차 0) — 같은 픽셀에 같은 연산이고 누가 하냐만 다르다.
+    # 지연만 23→33ms 로 늘지만 12Hz 예산 83ms 의 절반이라 루프 주기에는 영향이 없다.
+    # ⚠️ 프로세스 전역 설정이라 detect.py 가 아니라 여기 둔다. detect.py 에 두면 그
+    #    모듈을 import 하는 다른 프로세스(watch.py, 3단계의 미션 BT)까지 조용히 묶인다.
+    cv2.setNumThreads(1)
 
     K, dist = load_calib(a.slot, a.rotate)
     cam = open_camera(a.source, rotate=a.rotate)
