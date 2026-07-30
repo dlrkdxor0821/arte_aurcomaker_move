@@ -32,22 +32,9 @@ source /opt/ros/jazzy/setup.bash
 python3 -c "import rclpy" 2>/dev/null || {
   echo "[marker-drive] rclpy 가 안 잡힙니다 — ROS2 설치·소싱을 확인하세요." >&2; exit 1; }
 
-# robot-test.sh 가 현장에서 잡은 값. 있으면 읽고, 없으면 코드 기본값으로 간다.
-# 이미 export 된 환경변수가 이기도록 field.env 쪽은 기본값 대입(:=)으로 넣는다.
-if [ -f "$HERE/config/field.env" ]; then
-  while IFS='=' read -r k v; do
-    # 키가 셸 변수명 꼴이 아니면 건너뛴다. eval 에 그대로 넘기면 깨진 줄 하나가
-    # 'bad substitution' 으로 주행 전체를 막는다(로그 문장이 값에 섞여 실제로 그랬다).
-    case "$k" in
-      [A-Za-z_]*) [[ "$k" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || { echo "[warn] field.env 의 이상한 줄 무시: $k" >&2; continue; } ;;
-      *) continue ;;
-    esac
-    eval ": \${$k:=\$v}"
-  done < "$HERE/config/field.env"
-  # 도메인은 환경변수라야 rclpy 가 본다. 이게 틀리면 토픽이 안 보여서
-  # '구동 노드가 없다'로 오진한다 — 실제로 그렇게 한 번 헤맸다.
-  [ -n "${ROS_DOMAIN_ID:-}" ] && export ROS_DOMAIN_ID
-fi
+# setup.sh 가 현장에서 잡은 값. 있으면 읽고, 없으면 코드 기본값으로 간다.
+# shellcheck source=pi/field.sh
+source "$HERE/pi/field.sh"
 
 ARGS=("$MODE")
 [ -n "${SOURCE:-}" ]           && ARGS+=(--source "$SOURCE")

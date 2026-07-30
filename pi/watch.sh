@@ -15,5 +15,22 @@
 # '검출 0개'는 원인이 다섯이다(사전·ID·크기·밝기·화면 밖). 그래서 잡힌 마커를 전부
 # 그리고, 하나도 못 잡으면 1초에 한 번 모든 사전을 훑어 화면과 로그에 적는다.
 set -eo pipefail
-cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-exec python3 -m marker.watch "$@"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$HERE"
+
+# drive.sh 와 **같은** 값을 본다. 안 그러면 관찰 화면은 id 1 을 찾고 주행은 id 0 을
+# 찾는 상태가 되고, 그건 어디에도 표시가 안 난다(실제로 그렇게 헤맸다).
+# shellcheck source=pi/field.sh
+source "$HERE/pi/field.sh"
+
+ARGS=()
+[ -n "${SOURCE:-}" ]    && ARGS+=(--source "$SOURCE")
+[ -n "${SLOT:-}" ]      && ARGS+=(--slot "$SLOT")
+[ -n "${ROTATE:-}" ]    && ARGS+=(--rotate "$ROTATE")
+[ -n "${MARKER_ID:-}" ] && ARGS+=(--marker-id "$MARKER_ID")
+[ -n "${MARKER_M:-}" ]  && ARGS+=(--marker-m "$MARKER_M")
+[ -n "${DICT:-}" ]      && ARGS+=(--dict "$DICT")
+[ -n "${STOP_M:-}" ]    && ARGS+=(--stop-m "$STOP_M")
+ARGS+=("$@")     # 명령줄이 맨 뒤 — argparse 는 뒤에 온 것이 이긴다
+
+exec python3 -m marker.watch "${ARGS[@]}"
