@@ -51,8 +51,34 @@ ask() {    # ask KEY "설명" 기본값 — 사용자 입력을 받아 저장. �
   save "$1" "${v:-$3}"
 }
 
+# 카메라를 이미 누가 잡고 있으면 모든 단계가 '검출 0개'로 보인다. 원인은 마커가
+# 아니라 경합인데, 화면에는 똑같이 '안 잡혔다'로 나와서 조명·초점을 붙잡고 헤맨다.
+cam_dev() { [ "$(get SOURCE)" = csi ] && echo /dev/video0 || echo "/dev/video$(get SOURCE)"; }
+cam_busy() {   # 잡고 있는 프로세스가 있으면 그걸 알리고 0 을 돌려준다
+  local dev pids p; dev="$(cam_dev)"
+  [ -e "$dev" ] || { bad "$dev 가 없다 — 카메라 연결 확인"; return 0; }
+  pids="$(fuser "$dev" 2>/dev/null | tr -s ' ')"
+  [ -n "${pids// /}" ] || return 1
+  bad "$dev 를 이미 쓰는 프로세스가 있다 —$pids"
+  for p in $pids; do
+    info "PID $p: $(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null | cut -c1-80)"
+  done
+  info "끄기: kill$pids   (대개 './pi/watch.sh' 관찰 창이다)"
+  return 0
+}
+
 # detect 를 N초만 돌려 출력을 그대로 돌려준다(모터 무접촉).
-detect_run() { local s=$1; shift; timeout "$s" ./pi/drive.sh detect "$@" 2>&1 || true; }
+detect_run() {
+  local s=$1; shift
+  local out; out="$(timeout "$s" ./pi/drive.sh detect "$@" 2>&1 || true)"
+  # 카메라를 못 열면 검출 줄이 아예 없다. 여기서 짚지 않으면 각 단계가
+  # '마커가 안 잡혔다'로 오진한다 — 실제로 그 메시지에 두 번 속았다.
+  if grep -q '영상 소스를 열 수 없다\|카메라 프레임이 없다' <<<"$out"; then
+    bad "카메라를 못 열었다. 마커 문제가 아니다."
+    cam_busy || info "장치를 잡은 프로세스는 없다 — 인덱스(SOURCE=$(get SOURCE))나 연결을 봐라"
+  fi
+  echo "$out"
+}
 
 get() {    # get KEY — 저장된 값(없으면 빈 문자열)
   grep -oE "^$1=.*" "$ENVFILE" 2>/dev/null | tail -1 | cut -d= -f2
@@ -160,6 +186,16 @@ step1() {
   fi
   ok "가장 많이 잡힌 사전: $top"
   ask DICT "사전 이름" "$top"
+
+  # ID 도 여기서 잡는다. setup 이 안 물으면 코드 기본값(1)이 남는데, 벽 마커가
+  # 0 이면 이후 모든 단계가 '마커가 안 잡혔다'로 죽는다 — 사전은 맞는데 ID 만
+  # 틀린 경우라서 화면상 증상이 '아무것도 안 보임'과 똑같다. 실제로 그렇게 헤맸다.
+  local raw ids first
+  raw="$(echo "$out" | grep -oE "${top}\[[^]]*\]" | head -1)"
+  ids="${raw#"${top}["}"; ids="${ids%]}"
+  first="${ids%%,*}"; first="${first// /}"
+  info "그 사전에서 보인 ID: ${ids:-없음}"
+  ask MARKER_ID "따라갈 마커 ID" "${first:-1}"
 }
 
 step2() {
