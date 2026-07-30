@@ -54,6 +54,15 @@ ask() {    # ask KEY "설명" 기본값 — 사용자 입력을 받아 저장. �
 # detect 를 N초만 돌려 출력을 그대로 돌려준다(모터 무접촉).
 detect_run() { local s=$1; shift; timeout "$s" ./pi/drive.sh detect "$@" 2>&1 || true; }
 
+get() {    # get KEY — 저장된 값(없으면 빈 문자열)
+  grep -oE "^$1=.*" "$ENVFILE" 2>/dev/null | tail -1 | cut -d= -f2
+}
+
+# 진행 방향 쪽 끝단 이름. 뒷캠은 후진이라 자로 재는 면이 반대다 —
+# '최전방~벽' 을 물어 놓고 뒤로 가면 오프셋이 로봇 길이만큼 통째로 틀린다.
+edge() { [ "$(get SLOT)" = back ] && echo "최후방" || echo "최전방"; }
+ahead() { [ "$(get SLOT)" = back ] && echo "뒤" || echo "앞"; }
+
 # "z=0.812m" 같은 필드들의 중앙값. 흔들리는 한 프레임에 값이 끌려가지 않게.
 median_of() { grep -oE "$1=[-+]?[0-9.]+" | cut -d= -f2 | sort -g | awk '{a[NR]=$1} END{if(NR)printf "%.3f", a[int((NR+1)/2)]}'; }
 
@@ -66,6 +75,17 @@ step0() {
   # 않도록 지금 값을 저장해 두고, drive.sh 가 그대로 쓴다.
   ok "ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}"
   save ROS_DOMAIN_ID "${ROS_DOMAIN_ID:-0}" >/dev/null
+
+  # 어느 캠으로 갈지가 나머지 단계 전부의 전제다. 이걸 안 물으면 reset 뒤에 앞캠
+  # 기본값으로 조용히 돌아가서, 뒷캠으로 잡은 장착각·오프셋을 앞캠 값으로 덮어쓴다.
+  local cam c; cam="$(get SLOT)"
+  read -r -p "      카메라 — front(CSI 앞캠, 전진) / back(USB 뒷캠, 후진) [${cam:-back}]: " c
+  case "${c:-${cam:-back}}" in
+    front) save SLOT front; save SOURCE csi; save ROTATE 180 ;;
+    back)  save SLOT back;  save SOURCE 1;   save ROTATE 0 ;;
+    *) bad "front 또는 back 만 된다"; exit 1 ;;
+  esac
+  [ "$(get SLOT)" = back ] && info "뒷캠 = **후진** 주행이다. 로봇 뒤를 비워라."
   python3 -c "import rclpy" 2>/dev/null && ok "rclpy" || { bad "rclpy 안 잡힘"; fail=1; }
   python3 -c "import cv2" 2>/dev/null && ok "opencv" || { bad "opencv 없음"; fail=1; }
   python3 -c "import picamera2" 2>/dev/null && ok "picamera2 (CSI 카메라)" \
@@ -157,8 +177,8 @@ step2() {
 }
 
 step3() {
-  say "[3/7] 앞면 오프셋 (--front-offset)"
-  info "카메라와 로봇 최전방 사이 거리다. 로봇을 벽 앞에 두고 계속."
+  say "[3/7] 끝단 오프셋 (--front-offset)"
+  info "카메라와 로봇 $(edge) 사이 거리다. 로봇 $(edge)이 벽을 마주보게 두고 계속."
   pause
   local out z m
   out="$(detect_run 8 --front-offset 0)"
@@ -166,7 +186,7 @@ step3() {
   z="$(echo "$out" | grep '^marker: z=' | median_of z)"
   [ -z "$z" ] && { bad "마커가 안 잡혔다"; exit 1; }
   ok "카메라~마커 거리 ${z}m"
-  read -r -p "      자로 잰 (로봇 최전방~벽) 거리를 m 로 입력 [예: 0.35]: " m
+  read -r -p "      자로 잰 (로봇 $(edge)~벽) 거리를 m 로 입력 [예: 0.35]: " m
   if [ -z "$m" ]; then
     save FRONT_OFFSET 0.0
   else
@@ -289,7 +309,7 @@ step6() {
   info "10cm 면 충분하다(많을수록 뚜렷). 판정은 '어느 쪽인가'가 아니라"
   info "'마커 쪽으로 트는가 반대로 트는가'라서 어느 쪽에 두든 같다."
   info "거리는 0.6~1.2m 아무 데나. 좁으면 짧게 해도 극성은 보인다."
-  info "로봇 앞을 비워라. 두 번째 터미널에 './pi/drive.sh stop' 준비."
+  info "로봇 $(ahead)를 비워라(진행 방향). 두 번째 터미널에 './pi/drive.sh stop' 준비."
   info "볼 것은 '도착했나'가 아니라 **처음 몇 초에 어느 쪽으로 트는가** 하나뿐이다."
   read -r -p "      준비됐으면 yes 입력: " c
   [ "$c" = "yes" ] || { info "중단. 준비되면: ./pi/setup.sh 6"; exit 0; }
@@ -313,7 +333,7 @@ step6() {
 step7() {
   say "[7/7] 정상 주행 + 정지 거리 보정 (--stop-m)"
   info "마커를 정면에, 치우침 없이 둬라. 거리는 **낼 수 있는 최대**(0.8m 면 충분)."
-  info "로봇 앞을 비워라. 두 번째 터미널에 './pi/drive.sh stop' 준비."
+  info "로봇 $(ahead)를 비워라(진행 방향). 두 번째 터미널에 './pi/drive.sh stop' 준비."
   read -r -p "      준비됐으면 yes 입력: " c
   [ "$c" = "yes" ] || { info "중단. 준비되면: ./pi/setup.sh 7"; exit 0; }
   ./pi/drive.sh; local rc=$?
@@ -324,7 +344,7 @@ step7() {
     exit 1
   fi
   local m new
-  read -r -p "      자로 잰 (로봇 최전방~벽) 실제 거리 m (건너뛰려면 엔터): " m
+  read -r -p "      자로 잰 (로봇 $(edge)~벽) 실제 거리 m (건너뛰려면 엔터): " m
   [ -n "$m" ] || return 0
   # 목표 0.10 인데 실제 M 에 섰으면 오차만큼 목표를 당긴다: 0.10 - (M - 0.10)
   new="$(awk -v m="$m" 'BEGIN{printf "%.3f", 0.20-m}')"
