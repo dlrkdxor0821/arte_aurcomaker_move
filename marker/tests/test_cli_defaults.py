@@ -57,6 +57,13 @@ def test_explicit_flags_override(drive_module):
     assert cfg.sensor_timeout_s == 0.8
 
 
+def test_back_slot_drives_backward(drive_module):
+    """뒷캠 슬롯은 후진이다. 부호를 안 뒤집으면 마커에서 멀어지는 쪽으로 간다."""
+    assert drive_module._drive_sign("back") == -1.0
+    assert drive_module._drive_sign("front") == 1.0
+    assert drive_module._drive_sign("front0") == 1.0
+
+
 def test_modes_and_scan_dicts_parse(drive_module):
     assert drive_module._parse(["detect", "--scan-dicts"]).scan_dicts is True
     assert drive_module._parse(["stop"]).mode == "stop"

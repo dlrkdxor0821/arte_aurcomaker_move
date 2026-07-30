@@ -33,9 +33,9 @@ def main(argv=None) -> int:
     ap.add_argument("--no-window", action="store_true", help="창 없이 텍스트만")
     a = ap.parse_args(argv)
 
-    K, dist = load_calib(a.slot, a.rotate)
-    cam = open_camera(a.source, rotate=a.rotate)
-    print(f"[ok] source={a.source} slot={a.slot} id={a.marker_id} dict={a.dict_name}")
+    K, dist, (w, h) = load_calib(a.slot, a.rotate)
+    cam = open_camera(a.source, width=w, height=h, rotate=a.rotate)
+    print(f"[ok] source={a.source} slot={a.slot} {w}x{h} id={a.marker_id} dict={a.dict_name}")
     try:
         while True:
             frame = cam.get_frame()

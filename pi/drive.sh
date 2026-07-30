@@ -6,6 +6,7 @@
 #   ./pi/drive.sh detect --scan-dicts   벽 마커가 어떤 사전인지 확인
 #   ./pi/drive.sh stop                  즉시 정지 — 모터를 물고 있으므로 비상구다
 #   ./pi/drive.sh drive --steer-sign -1 --axis-gate 0.5     플래그는 그대로 위임
+#   SLOT=back SOURCE=1 ROTATE=0 ./pi/drive.sh   뒷캠(USB /dev/video1, 320x240)으로 후진 접근
 #
 # ⚠️ 전제 1: 로봇 구동 노드가 떠 있어야 한다(/cmd_vel 구독, /odom·/scan 발행).
 # ⚠️ 전제 2: 다른 스택(추종·영상송출·nav2)은 떠 있으면 안 된다.

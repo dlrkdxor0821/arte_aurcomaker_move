@@ -150,15 +150,37 @@ git 에 올리지 않는다.
 `--slot` 과 `--rotate` 는 짝이다. 어긋나면 `load_calib` 이 막는다 — 조용히 돌면
 거리(`z_m`)는 그럴듯하게 나오고 좌우만 흐르는, 가장 찾기 어려운 증상이 된다.
 
-| 슬롯 | 파일 | 맞는 `--rotate` | cx |
-|---|---|---|---|
-| `front` | `picam_640x480_rot180.npz` | `180` | 278.17 |
-| `front0` | `picam_640x480.npz` | `0` | 360.83 |
-| `back` | `usb_640x480.npz` | `0` | 255.94 |
+| 슬롯 | 파일 | 해상도 | 맞는 `--rotate` | cx | 진행 방향 |
+|---|---|---|---|---|---|
+| `front` | `picam_640x480_rot180.npz` | 640x480 | `180` | 278.17 | 전진 |
+| `front0` | `picam_640x480.npz` | 640x480 | `0` | 360.83 | 전진 |
+| `back` | `usb_320x240.npz` | 320x240 | `0` | 147.13 | **후진** |
 
-세 파일 모두 `aba_project/config/camera/` 원본을 바이트 단위로 복사한 것이다.
-`front`/`back` 짝은 `aba_project` 영상 송출(`camera_sender.py`)의 기본 회전값과 일치한다
-(picamera → 180, 뒷캠 → 0). 회전 유무로 cx 가 82.66px 달라진다 — 640px 폭의 13%.
+모두 `aba_project/config/camera/` 원본을 바이트 단위로 복사한 것이다.
+`front` 짝은 `aba_project` 영상 송출(`camera_sender.py`)의 기본 회전값과 일치한다.
+회전 유무로 cx 가 82.66px 달라진다 — 640px 폭의 13%.
+
+**해상도는 캘리브 파일이 정한다.** `load_calib` 이 `image_size` 를 같이 돌려주고
+`drive.py`/`watch.py` 가 그 값으로 카메라를 연다. 320x240 으로 잰 `back` 을 640x480 으로
+열면 fx·cx 가 그대로 두 배 틀려 **거리가 절반으로 읽힌다** — 죽지 않는 종류의 오류다.
+
+### 뒷캠 = 후진
+
+`back` 슬롯은 로봇 뒤를 보는 USB 웹캠이다(`/dev/video1`, `RES=320x240 USB_INDEX=1
+./scripts/cam-calib/calib-pi.sh usb` 로 캘리브). 그래서 마커로 가려면 **후진**이다:
+
+```bash
+SLOT=back SOURCE=1 ROTATE=0 ./pi/drive.sh          # 뒷캠으로 후진 접근
+SLOT=back SOURCE=1 ROTATE=0 ./pi/drive.sh detect   # 모터 무접촉 확인 먼저
+```
+
+뒤집히는 것은 **직진 축뿐**이다. 뒷캠은 앞캠을 수직축으로 180° 돌려 단 것이고, 수직축
+회전은 z 축 회전량을 보존한다 — 화면에서 오른쪽으로 치우친 마커를 되잡는 각속도 부호가
+앞캠과 같다는 뜻이다. 그래서 `--steer-sign` 과 pose 게인은 그대로 두고, `drive.py` 가
+세 가지만 뒤집는다: `/cmd_vel` 의 `linear.x`, `/odom` 전진 성분, `/scan` 근접 감시가 볼
+방향(`--scan-forward-deg` 에 180° 를 더한다). 상태기계는 여전히 '앞으로 간다'고 믿는다.
+
+`--front-offset` 은 `back` 슬롯에서 **카메라~로봇 최후방** 거리다.
 
 ## 구조
 

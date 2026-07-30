@@ -11,12 +11,17 @@ CALIB_DIR = pathlib.Path(__file__).resolve().parents[1] / "config" / "camera"
 CALIB_FILES = {
     "front": "picam_640x480_rot180.npz",   # picam CSI, 거꾸로 장착 → --rotate 180
     "front0": "picam_640x480.npz",         # 같은 CSI 카메라를 바로 세워 달았을 때 → --rotate 0
-    "back": "usb_640x480.npz",             # USB 웹캠 (3단계용)
+    "back": "usb_320x240.npz",             # 뒷캠 USB 웹캠 (/dev/video1, 320x240) → --rotate 0
 }
 
 
 def load_calib(slot: str, rotate: int | None = None):
-    """rotate 를 주면 그 회전으로 캘리브된 파일인지 확인하고, 아니면 막는다.
+    """(K, dist, (w, h)) 를 돌려준다. rotate 를 주면 짝이 맞는지 확인하고 아니면 막는다.
+
+    해상도를 같이 주는 이유: K 는 캘리브한 해상도에서만 맞는다. 320x240 으로 잰
+    카메라를 640x480 으로 열면 fx·cx 가 그대로 두 배 틀려 거리가 절반으로 읽힌다 —
+    죽지 않고 그럴듯한 숫자가 나오는 종류의 오류다. 그래서 호출자가 해상도를
+    고르게 두지 않고 캘리브 파일이 정한다.
 
     회전본은 npz 에 rotation_deg 를 갖고 있다. 없으면 원본(0도)이다.
     짝이 틀리면 거리는 그럴듯한데 좌우만 흐르는, 가장 찾기 어려운 증상이 된다.
@@ -34,4 +39,5 @@ def load_calib(slot: str, rotate: int | None = None):
             f"--rotate {rotate} 로 돌리려 한다.\n"
             f"cx 가 80px 넘게 달라 좌우 오차가 통째로 틀어진다. "
             f"짝: front=180, front0=0, back=0")
-    return data["camera_matrix"], data["dist_coeffs"]
+    w, h = (int(v) for v in data["image_size"])
+    return data["camera_matrix"], data["dist_coeffs"], (w, h)
