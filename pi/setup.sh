@@ -379,11 +379,15 @@ step7() {
     info "여기서 거리를 재서 보정하면 안 된다 — 안 움직인 거리를 목표로 삼게 된다."
     exit 1
   fi
-  local m new
+  local m new want
+  # 지금 목표를 읽어서 쓴다. 0.10 을 박아 두면 STOP_M 을 손으로 바꾼 뒤 이 단계가
+  # 옛 목표 기준으로 보정해서, 맞춰 놓은 거리를 조용히 되돌린다.
+  want="$(get STOP_M)"; want="${want:-0.10}"
+  info "현재 목표 STOP_M=${want}m (로봇 $(edge)~벽)"
   read -r -p "      자로 잰 (로봇 $(edge)~벽) 실제 거리 m (건너뛰려면 엔터): " m
   [ -n "$m" ] || return 0
-  # 목표 0.10 인데 실제 M 에 섰으면 오차만큼 목표를 당긴다: 0.10 - (M - 0.10)
-  new="$(awk -v m="$m" 'BEGIN{printf "%.3f", 0.20-m}')"
+  # 목표 W 인데 실제 M 에 섰으면 오차만큼 목표를 당긴다: W - (M - W)
+  new="$(awk -v m="$m" -v w="$want" 'BEGIN{printf "%.3f", 2*w-m}')"
   # 7cm 마커는 약 12.6cm 부터 화면에서 잘린다. 목표를 너무 당기면 눈감고 가는 구간만 길어진다.
   if awk -v v="$new" 'BEGIN{exit !(v<0.05 || v>0.30)}'; then
     bad "보정값 ${new}m 는 범위 밖이다(0.05~0.30). 측정이나 주행이 잘못됐을 가능성이 크다."
