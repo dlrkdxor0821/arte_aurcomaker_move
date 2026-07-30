@@ -83,6 +83,19 @@ def scan_dicts(frame) -> list[tuple[str, list[int]]]:
     return found
 
 
+def detect_all(frame, dict_name: str) -> list[tuple[int, np.ndarray]]:
+    """그 사전에서 잡힌 마커 전부 [(id, 코너4점), ...]. 관찰용이다.
+
+    detect_marker 는 대상 ID 하나만 보고 나머지는 버린다. 안 잡힌다고 할 때
+    필요한 정보는 '아무것도 안 보인다'와 '보이는데 ID 가 다르다'의 구분이다.
+    """
+    _gray_frame = _gray(frame)
+    corners, ids, _ = _detect_raw(_gray_frame, dict_name)
+    if ids is None or len(ids) == 0:
+        return []
+    return [(int(i), c.reshape(4, 2)) for c, i in zip(corners, ids.flatten())]
+
+
 def detect_marker(frame, K, dist, *, marker_len_m: float, target_id: int,
                   dict_name: str, max_reproj_px: float = 4.0) -> MarkerObs | None:
     """대상 ID 마커를 찾아 관측값을 만든다. 없으면 None.
